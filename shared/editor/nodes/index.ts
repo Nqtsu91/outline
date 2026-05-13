@@ -10,6 +10,7 @@ import Code from "../marks/Code";
 import Comment from "../marks/Comment";
 import Highlight from "../marks/Highlight";
 import Italic from "../marks/Italic";
+import TextColor from "../marks/TextColor";
 import Link from "../marks/Link";
 import TemplatePlaceholder from "../marks/Placeholder";
 import Strikethrough from "../marks/Strikethrough";
@@ -112,6 +113,7 @@ export const richExtensions: Nodes = [
   Heading,
   HorizontalRule,
   Highlight,
+  TextColor,
   TemplatePlaceholder,
   Math,
   MathBlock,
