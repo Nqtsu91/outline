@@ -25,6 +25,7 @@ import {
 import { v4 as uuidv4 } from "uuid";
 import CellBackgroundColorPicker from "../components/CellBackgroundColorPicker";
 import HighlightColorPicker from "../components/HighlightColorPicker";
+import TextColorPicker from "../components/TextColorPicker";
 import type { EditorState } from "prosemirror-state";
 
 import { getDocumentHighlightColors } from "@shared/editor/queries/getDocumentHighlightColors";
@@ -52,6 +53,7 @@ import {
 import { CellSelection } from "prosemirror-tables";
 import TableCell from "@shared/editor/nodes/TableCell";
 import Highlight from "@shared/editor/marks/Highlight";
+import TextColors from "@shared/editor/marks/TextColors";
 import { DottedCircleIcon } from "~/components/Icons/DottedCircleIcon";
 
 export default function formattingMenuItems(
@@ -74,6 +76,12 @@ export default function formattingMenuItems(
     state
   ).find(({ mark }) => mark.type === state.schema.marks.highlight);
 
+  const textColor = getMarksBetween(
+    state.selection.from,
+    state.selection.to,
+    state
+  ).find(({ mark }) => mark.type === state.schema.marks.text_color);
+  
   const cellSelectionHasBackground = isTableCell
     ? hasNodeAttrMarkCellSelection(
         state.selection as CellSelection,
@@ -307,6 +315,18 @@ export default function formattingMenuItems(
         ];
       },
     },
+	icon: (
+	  <span
+	    style={{
+	      fontWeight: 600,
+	      fontSize: 14,
+	      color: textColor?.mark.attrs.color || TextColors.presetColors[0].hex,
+	      lineHeight: 1,
+	    }}
+	  >
+	    A
+	  </span>
+	),
     {
       name: "code_inline",
       tooltip: t("Code"),
