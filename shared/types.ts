@@ -434,6 +434,7 @@ export type TeamPreferences = {
 export enum NavigationNodeType {
   Collection = "collection",
   Document = "document",
+  Group = "group",
   UserMembership = "userMembership",
   GroupMembership = "groupMembership",
 }
@@ -441,7 +442,7 @@ export enum NavigationNodeType {
 export type NavigationNode = {
   id: string;
   title: string;
-  url: string;
+  url?: string;
   emoji?: string;
   icon?: string;
   color?: string;

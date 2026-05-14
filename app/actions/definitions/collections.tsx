@@ -498,6 +498,30 @@ export const exportCollection = createAction({
   },
 });
 
+export const createPageGroup = createAction({
+  name: ({ t }) => t("New group"),
+  analyticsName: "New page group",
+  section: ActiveCollectionSection,
+  icon: <CollectionIcon />,
+  keywords: "new create group section",
+  visible: ({ getActivePolicies }) =>
+    getActivePolicies(Collection).some(
+      (policy) => policy.abilities.createDocument
+    ),
+  perform: async ({ getActiveModel, stores, t }) => {
+    const collection = getActiveModel(Collection);
+    if (!collection) return;
+    await stores.documents.create(
+      {
+        collectionId: collection.id,
+        title: t("New Group"),
+        type: "group",
+      },
+      { publish: true }
+    );
+  },
+});
+
 export const createDocument = createInternalLinkAction({
   name: ({ t }) => t("New document"),
   analyticsName: "New document",

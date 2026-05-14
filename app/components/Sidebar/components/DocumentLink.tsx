@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useHistory } from "react-router-dom";
 import Icon from "@shared/components/Icon";
 import type { NavigationNode } from "@shared/types";
-import { UserPreference } from "@shared/types";
+import { NavigationNodeType, UserPreference } from "@shared/types";
 import { ProsemirrorHelper } from "@shared/utils/ProsemirrorHelper";
 import { sortNavigationNodes } from "@shared/utils/collections";
 import type Collection from "~/models/Collection";
@@ -29,6 +29,7 @@ import { useSidebarExpansion } from "./SidebarExpansionContext";
 import DocumentRow from "./DocumentRow";
 import DropCursor from "./DropCursor";
 import Folder from "./Folder";
+import PageGroupLink from "./PageGroupLink";
 import type { SidebarContextType } from "./SidebarContext";
 import { useSidebarContext } from "./SidebarContext";
 
@@ -44,7 +45,7 @@ type Props = {
   parentId?: string;
 };
 
-const DocumentLink = observer(function DocumentLinkInner({
+const DocumentLinkInner = observer(function DocumentLinkInner({
   node,
   collection,
   membership,
@@ -367,6 +368,23 @@ const DocumentLink = observer(function DocumentLinkInner({
       </Folder>
     </DocumentRow>
   );
+});
+
+const DocumentLink = observer(function DocumentLink(props: Props) {
+  if (props.node.type === NavigationNodeType.Group) {
+    return (
+      <PageGroupLink
+        node={props.node}
+        collection={props.collection}
+        activeDocument={props.activeDocument}
+        prefetchDocument={props.prefetchDocument}
+        depth={props.depth}
+        index={props.index}
+        parentId={props.parentId}
+      />
+    );
+  }
+  return <DocumentLinkInner {...props} />;
 });
 
 export default DocumentLink;

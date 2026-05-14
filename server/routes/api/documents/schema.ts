@@ -464,6 +464,9 @@ export const DocumentsCreateSchema = BaseSchema.extend({
 
     /** Boolean to denote if the document should occupy full width */
     fullWidth: z.boolean().optional(),
+
+    /** Document node type: regular document or group header */
+    type: z.enum(["document", "group"]).optional(),
   }),
 }).refine(
   (req) =>

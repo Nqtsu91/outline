@@ -273,6 +273,13 @@ function DataLoader({ match, children }: Props) {
     );
   }
 
+  // Groups are section headers, not editable pages — redirect to collection
+  if (document.type === "group") {
+    return (
+      <Redirect to={document.collection?.path ?? "/"} />
+    );
+  }
+
   const canEdit = can.update && !document.isArchived && !revisionId;
   const readOnly = !isEditing || !canEdit;
 

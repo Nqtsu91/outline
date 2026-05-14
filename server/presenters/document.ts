@@ -65,6 +65,7 @@ async function presentDocument(
     text,
     icon: document.icon,
     color: document.color,
+    type: document.type,
     tasks: {
       completed: 0,
       total: 0,

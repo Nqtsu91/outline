@@ -44,6 +44,7 @@ import type {
   ProsemirrorData,
   SourceMetadata,
 } from "@shared/types";
+import { NavigationNodeType } from "@shared/types";
 import { ProsemirrorHelper } from "@shared/utils/ProsemirrorHelper";
 import { UrlHelper } from "@shared/utils/UrlHelper";
 import slugify from "@shared/utils/slugify";
@@ -309,6 +310,11 @@ class Document extends ArchivableModel<
   @Default(false)
   @Column
   template: boolean;
+
+  /** The type of document node: regular document or group header. */
+  @Default("document")
+  @Column(DataType.STRING(32))
+  type: "document" | "group";
 
   @Column
   insightsEnabled: boolean;
@@ -1322,9 +1328,10 @@ class Document extends ArchivableModel<
     return {
       id: this.id,
       title: this.title,
-      url: this.url,
+      url: this.type === "group" ? undefined : this.url,
       icon: isNil(this.icon) ? undefined : this.icon,
       color: isNil(this.color) ? undefined : this.color,
+      type: this.type === "group" ? NavigationNodeType.Group : NavigationNodeType.Document,
       children,
     };
   };

@@ -1679,6 +1679,7 @@ router.post(
       fullWidth,
       templateId,
       createdAt,
+      type,
     } = ctx.input.body;
     const editorVersion = ctx.headers["x-editor-version"] as string | undefined;
 
@@ -1744,6 +1745,7 @@ router.post(
       template,
       fullWidth,
       editorVersion,
+      type,
     });
 
     if (collection) {

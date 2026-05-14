@@ -161,6 +161,11 @@ export default class Document extends ArchivableModel implements Searchable {
   @observable
   insightsEnabled: boolean;
 
+  /** Whether this node is a regular document or a group header. */
+  @Field
+  @observable
+  type: "document" | "group" = "document";
+
   /**
    * A reference to the template that this document was created from.
    */
@@ -633,15 +638,16 @@ export default class Document extends ArchivableModel implements Searchable {
 
   @computed({ equals: comparer.structural })
   get asNavigationNode(): NavigationNode {
+    const isGroup = this.type === "group";
     return {
-      type: NavigationNodeType.Document,
+      type: isGroup ? NavigationNodeType.Group : NavigationNodeType.Document,
       id: this.id,
       title: this.title,
       color: this.color ?? undefined,
       icon: this.icon ?? undefined,
       children: this.childDocuments.map((doc) => doc.asNavigationNode),
-      url: this.url,
-      isDraft: this.isDraft,
+      url: isGroup ? undefined : this.url,
+      isDraft: isGroup ? undefined : this.isDraft,
     };
   }
 

@@ -15,6 +15,7 @@ type Props = Optional<
     | "content"
     | "icon"
     | "color"
+    | "type"
     | "collectionId"
     | "parentDocumentId"
     | "importId"
@@ -62,6 +63,7 @@ export default async function documentCreator(
     sourceMetadata,
     createdById,
     lastModifiedById,
+    type,
   }: Props
 ): Promise<Document> {
   const { user } = ctx.state.auth;
@@ -122,6 +124,7 @@ export default async function documentCreator(
     fullWidth: fullWidth ?? template?.fullWidth,
     icon: icon ?? template?.icon,
     color: color ?? template?.color,
+    type: type ?? "document",
     title: titleWithReplacements,
     content: contentWithReplacements,
     state,
