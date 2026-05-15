@@ -91,7 +91,7 @@ function useActivePage(share?: Share) {
     node: NavigationNode,
     slugToFind: string
   ): string | undefined => {
-    if (node.url.endsWith(slugToFind)) {
+    if (node.url?.endsWith(slugToFind)) {
       return node.id;
     }
     if (node.children) {

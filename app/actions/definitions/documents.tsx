@@ -115,7 +115,9 @@ export const openDocument = createActionWithChildren({
     );
     const documents = stores.documents.orderedData;
 
-    return uniqBy([...documents, ...nodes], "id").map((item) =>
+    return uniqBy([...documents, ...nodes], "id")
+      .filter((item) => !!item.url) // groups have no URL
+      .map((item) =>
       createInternalLinkAction({
         // Note: using url which includes the slug rather than id here to bust
         // cache if the document is renamed
@@ -131,7 +133,7 @@ export const openDocument = createActionWithChildren({
           <DocumentIcon outline={item.isDraft} />
         ),
         section: DocumentSection,
-        to: item.url,
+        to: item.url!,
       })
     );
   },
@@ -1099,11 +1101,11 @@ export const openRandomDocument = createAction({
   perform: ({ stores, activeDocumentId }) => {
     const nodes = stores.collections.navigationNodes
       .reduce((acc, node) => [...acc, ...node.children], [] as NavigationNode[])
-      .filter((node) => node.id !== activeDocumentId);
+      .filter((node) => node.id !== activeDocumentId && !!node.url);
 
     const random = nodes[Math.round(Math.random() * nodes.length)];
 
-    if (random) {
+    if (random?.url) {
       history.push(random.url);
     }
   },

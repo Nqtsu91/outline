@@ -260,6 +260,13 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
     format: FileOperationFormat
   ) {
     for (const node of nodes) {
+      // Group nodes have no URL and no exportable content — skip them
+      if (!node.url) {
+        if (node.children?.length) {
+          this.addDocumentTreeToPathMap(map, node.children, root, format);
+        }
+        continue;
+      }
       const title = serializeFilename(node.title) || "Untitled";
       const extension = format === FileOperationFormat.HTMLZip ? "html" : "md";
 

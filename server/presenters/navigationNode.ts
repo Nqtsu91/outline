@@ -20,14 +20,14 @@ export default function presentNavigationNode(
   team: Team,
   node: NavigationNode
 ): PresentedNavigationNode {
+  // Groups have no URL — skip them in the public API presentation
+  const url = node.url ?? "";
   return {
     id: node.id,
     title: node.title,
-    url: /^https?:\/\//.test(node.url)
-      ? node.url
-      : new URL(node.url, team.url).href,
-    children: (node.children ?? []).map((child) =>
-      presentNavigationNode(team, child)
-    ),
+    url: /^https?:\/\//.test(url) ? url : new URL(url, team.url).href,
+    children: (node.children ?? [])
+      .filter((child) => child.url !== undefined)
+      .map((child) => presentNavigationNode(team, child)),
   };
 }
