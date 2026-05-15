@@ -8,16 +8,22 @@ const shared = {
   database: process.env.DATABASE_NAME,
 };
 
+const sslDisabled =
+  process.env.PGSSLMODE === "disable" ||
+  process.env.DATABASE_SSL === "false";
+
 module.exports = {
   development: shared,
   test: shared,
   "production-ssl-disabled": shared,
-  production: {
-    ...shared,
-    dialectOptions: {
-      ssl: {
-        rejectUnauthorized: false,
+  production: sslDisabled
+    ? shared
+    : {
+        ...shared,
+        dialectOptions: {
+          ssl: {
+            rejectUnauthorized: false,
+          },
+        },
       },
-    },
-  },
 };
