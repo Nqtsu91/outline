@@ -32,6 +32,8 @@ ARG APP_PATH
 WORKDIR $APP_PATH
 ENV NODE_ENV=production
 
+RUN corepack enable
+
 # Create a non-root user compatible with Debian and BusyBox based images
 RUN addgroup --gid 1001 nodejs && \
     adduser --uid 1001 --ingroup nodejs nodejs && \
