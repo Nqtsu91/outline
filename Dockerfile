@@ -1,12 +1,30 @@
 ARG APP_PATH=/opt/outline
-ARG BASE_IMAGE=outlinewiki/outline-base
-FROM ${BASE_IMAGE} AS base
+
+# Build the app from source using our local Dockerfile.base
+# instead of pulling outlinewiki/outline-base (which uses Node 24)
+FROM node:20 AS base
 
 ARG APP_PATH
 WORKDIR $APP_PATH
+COPY ./package.json ./yarn.lock ./.yarnrc.yml ./
+COPY ./patches ./patches
+
+RUN apt-get update && apt-get install -y cmake
+ENV NODE_OPTIONS="--max-old-space-size=8192"
+
+RUN corepack enable
+RUN yarn install --immutable --network-timeout 1000000 && \
+  yarn cache clean
+
+COPY . .
+ARG CDN_URL
+RUN yarn build
+
+RUN yarn workspaces focus --production && \
+  yarn cache clean
 
 # ---
-FROM node:24.15.0-slim AS runner
+FROM node:20-slim AS runner
 
 LABEL org.opencontainers.image.source="https://github.com/outline/outline"
 
