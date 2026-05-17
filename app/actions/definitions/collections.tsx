@@ -5,6 +5,7 @@ import {
   CollectionIcon,
   EditIcon,
   ExportIcon,
+  GroupIcon,
   ImportIcon,
   SortManualIcon,
   NewDocumentIcon,
@@ -19,13 +20,18 @@ import {
   UnstarredIcon,
   UnsubscribeIcon,
 } from "outline-icons";
+import * as React from "react";
+import { useState, useCallback } from "react";
 import { toast } from "sonner";
 import Collection from "~/models/Collection";
+import Button from "~/components/Button";
 import { CollectionEdit } from "~/components/Collection/CollectionEdit";
 import { CollectionNew } from "~/components/Collection/CollectionNew";
 import CollectionDeleteDialog from "~/components/CollectionDeleteDialog";
 import ConfirmationDialog from "~/components/ConfirmationDialog";
 import DynamicCollectionIcon from "~/components/Icons/CollectionIcon";
+import Input from "~/components/Input";
+import useStores from "~/hooks/useStores";
 import { getHeaderExpandedKey } from "~/components/Sidebar/components/Header";
 import {
   createAction,
@@ -87,6 +93,26 @@ export const createCollection = createAction({
     stores.dialogs.openModal({
       title: t("Create a collection"),
       content: <CollectionNew onSubmit={stores.dialogs.closeAllModals} />,
+    });
+  },
+});
+
+export const createCollectionFolder = createAction({
+  name: ({ t }) => t("New folder"),
+  analyticsName: "New collection folder",
+  section: CollectionSection,
+  icon: <GroupIcon />,
+  keywords: "create folder group",
+  visible: ({ stores }) =>
+    stores.policies.abilities(stores.auth.team?.id || "").createCollection,
+  perform: ({ t, event, stores }) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    stores.dialogs.openModal({
+      title: t("Create a folder"),
+      content: (
+        <CreateFolderDialog onSubmit={stores.dialogs.closeAllModals} />
+      ),
     });
   },
 });
@@ -569,3 +595,47 @@ export const rootCollectionActions = [
   unsubscribeCollection,
   deleteCollection,
 ];
+
+// ---------------------------------------------------------------------------
+// Inline dialog component for creating a folder — used by createCollectionFolder
+// ---------------------------------------------------------------------------
+
+type CreateFolderDialogProps = { onSubmit: () => void };
+
+function CreateFolderDialog({ onSubmit }: CreateFolderDialogProps) {
+  const { collectionFolders } = useStores();
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = useCallback(
+    async (ev: React.FormEvent) => {
+      ev.preventDefault();
+      if (!name.trim()) return;
+      setSaving(true);
+      try {
+        await collectionFolders.create({ name: name.trim() });
+        onSubmit();
+      } finally {
+        setSaving(false);
+      }
+    },
+    [collectionFolders, name, onSubmit]
+  );
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <Input
+        type="text"
+        value={name}
+        onChange={(ev) => setName(ev.target.value)}
+        autoFocus
+        disabled={saving}
+        label="Name"
+        required
+      />
+      <Button type="submit" disabled={saving || !name.trim()}>
+        {saving ? "Saving…" : "Create folder"}
+      </Button>
+    </form>
+  );
+}

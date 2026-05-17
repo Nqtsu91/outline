@@ -1,6 +1,7 @@
 import fractionalIndex from "fractional-index";
 import { observer } from "mobx-react";
-import { useState, useEffect, useCallback } from "react";
+import * as React from "react";
+import { useEffect } from "react";
 import type { DropTargetMonitor } from "react-dnd";
 import { useDrop, useDrag } from "react-dnd";
 import { getEmptyImage } from "react-dnd-html5-backend";
@@ -8,7 +9,6 @@ import styled from "styled-components";
 import type Collection from "~/models/Collection";
 import type Document from "~/models/Document";
 import CollectionIcon from "~/components/Icons/CollectionIcon";
-import { useLocationSidebarContext } from "~/hooks/useLocationSidebarContext";
 import useStores from "~/hooks/useStores";
 import type { DragObject } from "../hooks/useDragAndDrop";
 import CollectionLink from "./CollectionLink";
@@ -17,27 +17,29 @@ import SidebarDisclosureContext, {
   useSidebarDisclosureState,
 } from "./SidebarDisclosureContext";
 import Relative from "./Relative";
-import { useSidebarContext } from "./SidebarContext";
 
 type Props = {
   collection: Collection;
   activeDocument: Document | undefined;
   belowCollection: Collection | void;
+  onOpen?: () => void;
 };
 
 function DraggableCollectionLink({
   collection,
   activeDocument,
   belowCollection,
+  onOpen,
 }: Props) {
-  const locationSidebarContext = useLocationSidebarContext();
-  const sidebarContext = useSidebarContext();
-  const { ui, policies, collections } = useStores();
-  const [expanded, setExpanded] = useState(
-    collection.id === ui.activeCollectionId &&
-      sidebarContext === locationSidebarContext
-  );
+  const { policies, collections } = useStores();
   const belowCollectionIndex = belowCollection ? belowCollection.index : null;
+
+  // Stop NavLink's fast-click (mousedown → navigate) from firing while the user
+  // might be starting a drag. React synthetic stopPropagation only affects the
+  // React event system — it does NOT block the native HTML5 dragstart.
+  const stopMouseDown = React.useCallback((ev: React.MouseEvent) => {
+    ev.stopPropagation();
+  }, []);
 
   // Context-based recursive expand/collapse for descendant DocumentLinks
   const { event: disclosureEvent, onDisclosureClick } =
@@ -82,48 +84,20 @@ function DraggableCollectionLink({
     preview(getEmptyImage(), { captureDraggingState: false });
   }, [preview]);
 
-  // If the current collection is active and relevant to the sidebar section we
-  // are in then expand it automatically
-  useEffect(() => {
-    if (
-      collection.id === ui.activeCollectionId &&
-      sidebarContext === locationSidebarContext
-    ) {
-      setExpanded(true);
-    }
-  }, [
-    collection.id,
-    ui.activeCollectionId,
-    sidebarContext,
-    locationSidebarContext,
-  ]);
-
-  const handleDisclosureClick = useCallback(
-    (ev) => {
-      ev?.preventDefault();
-      setExpanded((e) => {
-        const willExpand = !e;
-        onDisclosureClick(willExpand, !!ev?.altKey);
-        return willExpand;
-      });
-    },
-    [onDisclosureClick]
-  );
-
-  const displayChildDocuments = expanded && !isDragging;
-
   return (
     <SidebarDisclosureContext.Provider value={disclosureEvent}>
       <Draggable
         key={collection.id}
         ref={dragToReorderCollection}
         $isDragging={isDragging}
+        onMouseDownCapture={stopMouseDown}
+        onClick={onOpen}
       >
         <CollectionLink
           collection={collection}
-          expanded={displayChildDocuments}
+          expanded={undefined}
           activeDocument={activeDocument}
-          onDisclosureClick={handleDisclosureClick}
+          onDisclosureClick={() => undefined}
           isDraggingAnyCollection={isDraggingAnyCollection}
         />
       </Draggable>

@@ -43,6 +43,7 @@ export default async function presentCollection(
     color: collection.color,
     createdAt: collection.createdAt,
     updatedAt: collection.updatedAt,
+    folderId: collection.folderId,
     archivedBy: undefined,
   };
 

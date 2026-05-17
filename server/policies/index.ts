@@ -6,6 +6,7 @@ import "./apiKey";
 import "./attachment";
 import "./authenticationProvider";
 import "./collection";
+import "./collectionFolder";
 import "./comment";
 import "./document";
 import "./externalGroup";

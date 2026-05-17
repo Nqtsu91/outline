@@ -103,6 +103,12 @@ export default class Collection extends ParanoidModel {
   @observable
   archivedBy?: User;
 
+  /**
+   * The ID of the folder this collection belongs to, if any.
+   */
+  @observable
+  folderId?: string | null;
+
   @computed
   get searchContent(): string {
     return this.name;

@@ -1,6 +1,6 @@
 import fractionalIndex from "fractional-index";
 import { observer } from "mobx-react";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useDrop } from "react-dnd";
 import { useTranslation } from "react-i18next";
 import styled from "styled-components";
@@ -8,9 +8,10 @@ import type Collection from "~/models/Collection";
 import Flex from "~/components/Flex";
 import Error from "~/components/List/Error";
 import PaginatedList from "~/components/PaginatedList";
-import { createCollection } from "~/actions/definitions/collections";
+import { createCollection, createCollectionFolder } from "~/actions/definitions/collections";
 import useStores from "~/hooks/useStores";
 import type { DragObject } from "../hooks/useDragAndDrop";
+import CollectionFolderLink from "./CollectionFolderLink";
 import DraggableCollectionLink from "./DraggableCollectionLink";
 import DropCursor from "./DropCursor";
 import Header from "./Header";
@@ -22,11 +23,28 @@ import SidebarLink from "./SidebarLink";
 import Text from "@shared/components/Text";
 import usePolicy from "~/hooks/usePolicy";
 
-function Collections() {
-  const { documents, auth, collections } = useStores();
+type Props = {
+  onCollectionOpen?: () => void;
+};
+
+function Collections({ onCollectionOpen }: Props) {
+  const { documents, auth, collections, collectionFolders } = useStores();
   const { t } = useTranslation();
   const can = usePolicy(auth.team?.id);
   const orderedCollections = collections.allActive;
+
+  useEffect(() => {
+    void collectionFolders.fetchAll();
+  }, [collectionFolders]);
+
+  // Collections that do not belong to any folder.
+  // Intentionally NOT memoized — MobX observer must access c.folderId
+  // on every render so it re-renders reactively when a folderId changes.
+  const ungroupedCollections = orderedCollections.filter((c) => !c.folderId);
+
+  // Returns collections belonging to a specific folder
+  const collectionsByFolder = (folderId: string) =>
+    orderedCollections.filter((c) => c.folderId === folderId);
 
   const params = useMemo(
     () => ({
@@ -58,10 +76,19 @@ function Collections() {
       <Flex column>
         <Header id="collections" title={t("Collections")}>
           <Relative>
+            {collectionFolders.orderedData.map((folder) => (
+              <CollectionFolderLink
+                key={folder.id}
+                folder={folder}
+                collections={collectionsByFolder(folder.id)}
+                activeDocument={documents.active}
+                onCollectionOpen={onCollectionOpen}
+              />
+            ))}
             <PaginatedList<Collection>
               options={params}
               aria-label={t("Collections")}
-              items={orderedCollections}
+              items={ungroupedCollections}
               loading={<PlaceholderCollections />}
               heading={
                 isDraggingAnyCollection ? (
@@ -92,11 +119,13 @@ function Collections() {
                   key={item.id}
                   collection={item}
                   activeDocument={documents.active}
-                  belowCollection={orderedCollections[index + 1]}
+                  belowCollection={ungroupedCollections[index + 1]}
+                  onOpen={onCollectionOpen}
                 />
               )}
             />
             <SidebarAction action={createCollection} depth={0} />
+            <SidebarAction action={createCollectionFolder} depth={0} />
           </Relative>
         </Header>
       </Flex>

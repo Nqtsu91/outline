@@ -4,6 +4,7 @@ import pluralize from "pluralize";
 import ApiKeysStore from "./ApiKeysStore";
 import AuthStore from "./AuthStore";
 import AuthenticationProvidersStore from "./AuthenticationProvidersStore";
+import CollectionFoldersStore from "./CollectionFoldersStore";
 import CollectionsStore from "./CollectionsStore";
 import CommentsStore from "./CommentsStore";
 import DialogsStore from "./DialogsStore";
@@ -41,6 +42,7 @@ export default class RootStore {
   apiKeys: ApiKeysStore;
   auth: AuthStore;
   authenticationProviders: AuthenticationProvidersStore;
+  collectionFolders: CollectionFoldersStore;
   collections: CollectionsStore;
   groupMemberships: GroupMembershipsStore;
   comments: CommentsStore;
@@ -77,6 +79,7 @@ export default class RootStore {
     // Models
     this.registerStore(ApiKeysStore);
     this.registerStore(AuthenticationProvidersStore);
+    this.registerStore(CollectionFoldersStore);
     this.registerStore(CollectionsStore);
     this.registerStore(GroupMembershipsStore);
     this.registerStore(CommentsStore);

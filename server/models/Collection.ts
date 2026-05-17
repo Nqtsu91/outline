@@ -62,6 +62,7 @@ import { RedisPrefixHelper } from "@server/utils/RedisPrefixHelper";
 import removeIndexCollision from "@server/utils/removeIndexCollision";
 import { generateUrlId } from "@server/utils/url";
 import { ValidateIndex } from "@server/validation";
+import CollectionFolder from "./CollectionFolder";
 import Document from "./Document";
 import FileOperation from "./FileOperation";
 import Group from "./Group";
@@ -549,6 +550,13 @@ class Collection extends ParanoidModel<
   @ForeignKey(() => Team)
   @Column(DataType.UUID)
   teamId: string;
+
+  @BelongsTo(() => CollectionFolder, "folderId")
+  folder: CollectionFolder | null;
+
+  @ForeignKey(() => CollectionFolder)
+  @Column(DataType.UUID)
+  folderId: string | null;
 
   static DEFAULT_SORT: { field: "title" | "index"; direction: "asc" | "desc" } =
     {

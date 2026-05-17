@@ -100,8 +100,10 @@ function AppSidebar() {
       }
       // else: same collection was dismissed — stay in spaces mode.
     } else {
-      // Left all collection pages — clear dismissal for next collection visit.
+      // Left all collection pages (Home, Search, etc.) — clear dismissal and
+      // return to the spaces list.
       dismissedCollectionIdRef.current = undefined;
+      setSidebarModeRef.current("spaces");
     }
   }, [ui.activeCollectionId]);
 
@@ -122,6 +124,15 @@ function AppSidebar() {
     dismissedCollectionIdRef.current = ui.activeCollectionId;
     setSidebarMode("spaces");
   }, [setSidebarMode, ui.activeCollectionId]);
+
+  // Called when the user explicitly clicks a collection in the spaces list.
+  // Clears any prior dismissal so the panel opens even if the pathname or
+  // activeCollectionId hasn't changed (e.g. clicking the same collection
+  // that was just dismissed).
+  const handleCollectionOpen = useCallback(() => {
+    dismissedCollectionIdRef.current = undefined;
+    setSidebarMode("collection");
+  }, [setSidebarMode]);
 
   const handleSearchClick = useCallback(() => {
     const basePath = searchPath();
@@ -216,7 +227,7 @@ function AppSidebar() {
                 <SharedWithMe />
               </Section>
               <Section>
-                <Collections />
+                <Collections onCollectionOpen={handleCollectionOpen} />
               </Section>
               {can.createDocument && (
                 <Section auto>

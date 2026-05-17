@@ -8,6 +8,8 @@ export { default as Relationship } from "./Relationship";
 
 export { default as Collection } from "./Collection";
 
+export { default as CollectionFolder } from "./CollectionFolder";
+
 export { default as GroupMembership } from "./GroupMembership";
 
 export { default as UserMembership } from "./UserMembership";
