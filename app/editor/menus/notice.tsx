@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import * as React from "react";
+import styled from "styled-components";
 import {
   DoneIcon,
   ExpandedIcon,
@@ -10,6 +11,7 @@ import {
 import type { EditorState } from "prosemirror-state";
 import { NoticeTypes } from "@shared/editor/nodes/Notice";
 import type { MenuItem } from "@shared/editor/types";
+import { useEditor } from "~/editor/components/EditorContext";
 
 // ── Color palette ─────────────────────────────────────────────────────────────
 
@@ -31,15 +33,9 @@ const NOTICE_EMOJIS = [
   "🎯", "📝", "🚀", "💬", "🔔", "🎨",
 ];
 
-// ── Color swatch component ────────────────────────────────────────────────────
+// ── Color swatch (toolbar trigger icon) ──────────────────────────────────────
 
-function ColorSwatch({
-  color,
-  selected,
-}: {
-  color: string;
-  selected: boolean;
-}) {
+function ColorSwatch({ color }: { color: string }) {
   return (
     <span
       style={{
@@ -48,10 +44,7 @@ function ColorSwatch({
         height: "14px",
         borderRadius: "50%",
         background: color,
-        border: selected
-          ? `2px solid white`
-          : "1.5px solid rgba(0,0,0,0.12)",
-        boxShadow: selected ? `0 0 0 2px ${color}` : "none",
+        border: "1.5px solid rgba(0,0,0,0.12)",
         boxSizing: "border-box",
         verticalAlign: "middle",
         flexShrink: 0,
@@ -59,6 +52,160 @@ function ColorSwatch({
     />
   );
 }
+
+// ── Full color picker (renders inside the dropdown as custom content) ─────────
+
+function NoticeColorPickerContent({ currentColor }: { currentColor: string }) {
+  const { commands } = useEditor();
+
+  const handleSwatchClick = React.useCallback(
+    (color: string) => {
+      commands.setNoticeColor({ color });
+    },
+    [commands]
+  );
+
+  const handleNativeChange = React.useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      commands.setNoticeColor({ color: e.target.value });
+    },
+    [commands]
+  );
+
+  return (
+    <PickerWrapper>
+      <SwatchGrid>
+        {NOTICE_COLORS.map(({ color, label }) => (
+          <SwatchButton
+            key={color}
+            title={label}
+            $color={color}
+            $selected={currentColor.toLowerCase() === color.toLowerCase()}
+            onClick={() => handleSwatchClick(color)}
+          />
+        ))}
+      </SwatchGrid>
+      <NativeRow>
+        <NativeColorInput
+          type="color"
+          value={currentColor}
+          onChange={handleNativeChange}
+          title="Custom color"
+        />
+        <HexLabel>{currentColor.toUpperCase()}</HexLabel>
+      </NativeRow>
+    </PickerWrapper>
+  );
+}
+
+// ── Emoji picker (renders inside the dropdown as custom content) ──────────────
+
+function NoticeEmojiPickerContent({ currentIcon }: { currentIcon: string }) {
+  const { commands } = useEditor();
+
+  const handleEmojiClick = React.useCallback(
+    (icon: string) => {
+      commands.setNoticeIcon({ icon });
+    },
+    [commands]
+  );
+
+  return (
+    <EmojiGrid>
+      {NOTICE_EMOJIS.map((emoji) => (
+        <EmojiButton
+          key={emoji}
+          $selected={currentIcon === emoji}
+          onClick={() => handleEmojiClick(emoji)}
+          title={emoji}
+        >
+          {emoji}
+        </EmojiButton>
+      ))}
+    </EmojiGrid>
+  );
+}
+
+// ── Styled components ─────────────────────────────────────────────────────────
+
+const PickerWrapper = styled.div`
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const SwatchGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+`;
+
+const SwatchButton = styled.button<{ $color: string; $selected: boolean }>`
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: ${(p) => p.$color};
+  border: ${(p) =>
+    p.$selected
+      ? "2px solid white"
+      : "1.5px solid rgba(0,0,0,0.12)"};
+  box-shadow: ${(p) =>
+    p.$selected ? `0 0 0 2px ${p.$color}` : "none"};
+  cursor: pointer;
+  padding: 0;
+  transition: transform 80ms ease;
+  &:hover {
+    transform: scale(1.15);
+  }
+`;
+
+const NativeRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  padding-top: 8px;
+`;
+
+const NativeColorInput = styled.input`
+  width: 32px;
+  height: 26px;
+  padding: 1px 2px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  cursor: pointer;
+  background: none;
+`;
+
+const HexLabel = styled.span`
+  font-size: 12px;
+  font-family: monospace;
+  opacity: 0.6;
+  user-select: all;
+`;
+
+const EmojiGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 6px;
+`;
+
+const EmojiButton = styled.button<{ $selected: boolean }>`
+  font-size: 18px;
+  line-height: 1;
+  padding: 5px;
+  border-radius: 6px;
+  border: none;
+  background: ${(p) =>
+    p.$selected ? "rgba(0,0,0,0.1)" : "transparent"};
+  cursor: pointer;
+  transition: background 80ms ease;
+  &:hover {
+    background: rgba(0, 0, 0, 0.08);
+  }
+`;
 
 // ── Menu builder ──────────────────────────────────────────────────────────────
 
@@ -130,14 +277,17 @@ export default function noticeMenuItems(
       name: "setNoticeColor",
       visible: isCustom && !readOnly,
       tooltip: t("Color"),
-      icon: <ColorSwatch color={currentColor} selected={false} />,
-      children: NOTICE_COLORS.map(({ color, label }) => ({
-        name: "setNoticeColor",
-        attrs: { color },
-        icon: <ColorSwatch color={color} selected={currentColor === color} />,
-        label,
-        active: () => currentColor === color,
-      })),
+      icon: <ColorSwatch color={currentColor} />,
+      // Single "content" child renders the full picker inside the dropdown.
+      // Preset swatches close the dropdown naturally via Radix; the native
+      // <input type="color"> stays open because focus remains on the input.
+      children: [
+        {
+          content: (
+            <NoticeColorPickerContent currentColor={currentColor} />
+          ),
+        },
+      ],
     },
 
     // ── Emoji picker (only when custom) ───────────────────────────────
@@ -146,29 +296,15 @@ export default function noticeMenuItems(
       visible: isCustom && !readOnly,
       tooltip: t("Icon"),
       icon: (
-        <span
-          style={{ fontSize: "16px", lineHeight: 1, display: "inline-block" }}
-        >
-          {currentIcon}
-        </span>
+        <span style={{ fontSize: "16px", lineHeight: 1 }}>{currentIcon}</span>
       ),
-      children: NOTICE_EMOJIS.map((emoji) => ({
-        name: "setNoticeIcon",
-        attrs: { icon: emoji },
-        icon: (
-          <span
-            style={{
-              fontSize: "16px",
-              lineHeight: 1,
-              display: "inline-block",
-            }}
-          >
-            {emoji}
-          </span>
-        ),
-        label: emoji,
-        active: () => currentIcon === emoji,
-      })),
+      children: [
+        {
+          content: (
+            <NoticeEmojiPickerContent currentIcon={currentIcon} />
+          ),
+        },
+      ],
     },
   ];
 }
