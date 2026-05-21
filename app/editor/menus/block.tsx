@@ -235,6 +235,14 @@ export default function blockMenuItems(
       attrs: { style: "tip" },
     },
     {
+      name: "container_notice",
+      title: t("Custom notice"),
+      icon: <span style={{ fontSize: "18px", lineHeight: 1 }}>💡</span>,
+      keywords: "notice card custom color emoji",
+      attrs: { style: "custom", color: "#7C3AED", icon: "💡" },
+      skipIcon: false,
+    },
+    {
       name: "separator",
     },
     {

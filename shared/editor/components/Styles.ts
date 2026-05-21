@@ -1374,6 +1374,23 @@ ${
   }
 }
 
+/* Custom notice — background & border-left come from inline style on the element */
+.notice-block.custom {
+  color: ${props.theme.text};
+
+  .icon {
+    /* emoji icon: no svg color needed */
+    color: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  a {
+    color: ${props.theme.text};
+  }
+}
+
 blockquote {
   margin: 0;
   padding: 8px 10px 8px 1.5em;

@@ -20,6 +20,16 @@ export enum NoticeTypes {
   Success = "success",
   Tip = "tip",
   Warning = "warning",
+  Custom = "custom",
+}
+
+/** Convert a hex color (#RRGGBB) to rgba(r,g,b,alpha). */
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 export default class Notice extends Node {
@@ -37,6 +47,14 @@ export default class Notice extends Node {
         style: {
           default: NoticeTypes.Info,
         },
+        /** Hex color used only for the Custom notice type. */
+        color: {
+          default: "#7C3AED",
+        },
+        /** Emoji icon used only for the Custom notice type. */
+        icon: {
+          default: "💡",
+        },
       },
       content:
         "(list | blockquote | hr | paragraph | heading | code_block | code_fence | attachment)+",
@@ -44,6 +62,18 @@ export default class Notice extends Node {
       defining: true,
       draggable: true,
       parseDOM: [
+        // Custom notice — must come before the generic rule
+        {
+          tag: "div.notice-block.custom",
+          preserveWhitespace: "full",
+          contentElement: (node: HTMLDivElement) =>
+            node.querySelector("div.content") || node,
+          getAttrs: (dom: HTMLDivElement) => ({
+            style: NoticeTypes.Custom,
+            color: dom.dataset.color || "#7C3AED",
+            icon: dom.dataset.icon || "💡",
+          }),
+        },
         {
           tag: "div.notice-block",
           preserveWhitespace: "full",
@@ -95,7 +125,36 @@ export default class Notice extends Node {
         },
       ],
       toDOM: (node) => {
-        let icon;
+        let icon: HTMLDivElement | undefined;
+
+        // ── Custom notice ─────────────────────────────────────────────
+        if (node.attrs.style === NoticeTypes.Custom) {
+          const color: string = node.attrs.color || "#7C3AED";
+          const emoji: string = node.attrs.icon || "💡";
+
+          if (typeof document !== "undefined") {
+            icon = document.createElement("div");
+            icon.className = "icon";
+            icon.style.fontSize = "18px";
+            icon.style.lineHeight = "24px";
+            icon.style.textAlign = "center";
+            icon.textContent = emoji;
+          }
+
+          return [
+            "div",
+            {
+              class: "notice-block custom",
+              style: `background:${hexToRgba(color, 0.1)};border-left:4px solid ${color};`,
+              "data-color": color,
+              "data-icon": emoji,
+            },
+            ...(icon ? [icon] : []),
+            ["div", { class: "content" }, 0],
+          ];
+        }
+
+        // ── Standard notice types ──────────────────────────────────────
         if (typeof document !== "undefined") {
           let component;
 
@@ -136,6 +195,12 @@ export default class Notice extends Node {
         this.handleStyleChange(state, dispatch, NoticeTypes.Success),
       tip: (): Command => (state, dispatch) =>
         this.handleStyleChange(state, dispatch, NoticeTypes.Tip),
+      custom: (): Command => (state, dispatch) =>
+        this.handleStyleChange(state, dispatch, NoticeTypes.Custom),
+      setNoticeColor: (attrs: { color: string }): Command => (state, dispatch) =>
+        this.handleAttrChange(state, dispatch, { color: attrs.color }),
+      setNoticeIcon: (attrs: { icon: string }): Command => (state, dispatch) =>
+        this.handleAttrChange(state, dispatch, { icon: attrs.icon }),
     };
   }
 
@@ -161,12 +226,41 @@ export default class Notice extends Node {
     return false;
   };
 
+  handleAttrChange = (
+    state: EditorState,
+    dispatch: ((tr: Transaction) => void) | undefined,
+    updates: Record<string, Primitive>
+  ): boolean => {
+    const { tr, selection } = state;
+    const { $from } = selection;
+    const node = $from.node(-1);
+
+    if (node?.type.name === this.name) {
+      if (dispatch) {
+        dispatch(
+          tr.setNodeMarkup($from.before(-1), undefined, {
+            ...node.attrs,
+            ...updates,
+          })
+        );
+      }
+      return true;
+    }
+    return false;
+  };
+
   inputRules({ type }: { type: NodeType }) {
     return [wrappingInputRule(/^:::$/, type)];
   }
 
   toMarkdown(state: MarkdownSerializerState, node: ProsemirrorNode) {
-    state.write("\n:::" + (node.attrs.style || "info") + "\n");
+    if (node.attrs.style === NoticeTypes.Custom) {
+      const color: string = node.attrs.color || "#7C3AED";
+      const icon: string = node.attrs.icon || "💡";
+      state.write(`\n:::custom|${color}|${icon}\n`);
+    } else {
+      state.write("\n:::" + (node.attrs.style || "info") + "\n");
+    }
     state.renderContent(node);
     state.ensureNewLine();
     state.write(":::");
@@ -176,7 +270,18 @@ export default class Notice extends Node {
   parseMarkdown() {
     return {
       block: "container_notice",
-      getAttrs: (tok: Token) => ({ style: tok.info }),
+      getAttrs: (tok: Token) => {
+        const info = tok.info.trim();
+        if (info === NoticeTypes.Custom || info.startsWith("custom|")) {
+          const parts = info.split("|");
+          return {
+            style: NoticeTypes.Custom,
+            color: parts[1] || "#7C3AED",
+            icon: parts[2] || "💡",
+          };
+        }
+        return { style: info };
+      },
     };
   }
 }
