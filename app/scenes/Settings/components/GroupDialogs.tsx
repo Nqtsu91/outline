@@ -47,6 +47,63 @@ type Props = {
   onSubmit: () => void;
 };
 
+/**
+ * Minimal dialog that lets the user change only the group's icon and color,
+ * without touching name / description / other settings.
+ * Changes are applied immediately when the user picks an icon (auto-save).
+ */
+export function GroupIconDialog({ group, onSubmit }: Props) {
+  const { t } = useTranslation();
+  const [icon, setIcon] = React.useState<string | null>(group.icon ?? "team");
+  const [color, setColor] = React.useState<string>(
+    group.color ?? randomElement(colorPalette)
+  );
+  const [isSaving, setIsSaving] = React.useState(false);
+
+  const handleIconChange = React.useCallback(
+    async (newIcon: string | null, newColor: string | null) => {
+      const resolvedIcon = newIcon ?? undefined;
+      const resolvedColor = newColor ?? randomElement(colorPalette);
+      setIcon(newIcon);
+      setColor(resolvedColor);
+      setIsSaving(true);
+      try {
+        await group.save({ icon: resolvedIcon, color: resolvedColor });
+      } catch (err) {
+        toast.error(err.message);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [group]
+  );
+
+  const initial = group.name.charAt(0).toUpperCase();
+  const fallbackIcon = <Icon value={icon ?? "team"} initial={initial} color={color} />;
+
+  return (
+    <Flex column gap={16}>
+      <Text as="p" type="secondary">
+        <Trans>Choose an icon and color for this group.</Trans>
+      </Text>
+      <Flex justify="center">
+        <Suspense fallback={fallbackIcon}>
+          <IconPicker.Component
+            icon={icon}
+            color={color}
+            initial={initial}
+            popoverPosition="bottom-start"
+            onChange={handleIconChange}
+          />
+        </Suspense>
+      </Flex>
+      <Button onClick={onSubmit} disabled={isSaving}>
+        {isSaving ? `${t("Saving")}…` : t("Done")}
+      </Button>
+    </Flex>
+  );
+}
+
 export function CreateGroupDialog() {
   const { dialogs, groups } = useStores();
   const { t } = useTranslation();

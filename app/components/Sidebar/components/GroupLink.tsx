@@ -4,6 +4,8 @@ import * as React from "react";
 import Icon from "@shared/components/Icon";
 import type Group from "~/models/Group";
 import { useLocationSidebarContext } from "~/hooks/useLocationSidebarContext";
+import useBoolean from "~/hooks/useBoolean";
+import GroupMenu from "~/menus/GroupMenu";
 import Folder from "./Folder";
 import Relative from "./Relative";
 import SharedWithMeLink from "./SharedWithMeLink";
@@ -24,6 +26,7 @@ const GroupLink: React.FC<Props> = ({ group }) => {
   const [expanded, setExpanded] = React.useState(
     locationSidebarContext === sidebarContext
   );
+  const [menuOpen, handleMenuOpen, handleMenuClose] = useBoolean();
 
   const { event: disclosureEvent, onDisclosureClick } =
     useSidebarDisclosureState();
@@ -64,6 +67,15 @@ const GroupLink: React.FC<Props> = ({ group }) => {
         expanded={expanded}
         onClick={handleDisclosureClick}
         depth={0}
+        menu={
+          <GroupMenu
+            group={group}
+            hideMembers
+            onOpen={handleMenuOpen}
+            onClose={handleMenuClose}
+          />
+        }
+        $showActions={menuOpen}
       />
       <SidebarContext.Provider value={sidebarContext}>
         <SidebarDisclosureContext.Provider value={disclosureEvent}>

@@ -10,9 +10,13 @@ type Props = {
   group: Group;
   /** Whether to hide the "Members" navigation action. */
   hideMembers?: boolean;
+  /** Called when the dropdown opens. */
+  onOpen?: () => void;
+  /** Called when the dropdown closes. */
+  onClose?: () => void;
 };
 
-function GroupMenu({ group, hideMembers }: Props) {
+function GroupMenu({ group, hideMembers, onOpen, onClose }: Props) {
   const { t } = useTranslation();
   const rootAction = useGroupMenuActions(group, { hideMembers });
 
@@ -21,6 +25,8 @@ function GroupMenu({ group, hideMembers }: Props) {
       action={rootAction}
       align="end"
       ariaLabel={t("Group options")}
+      onOpen={onOpen}
+      onClose={onClose}
     >
       <OverflowMenuButton />
     </DropdownMenu>

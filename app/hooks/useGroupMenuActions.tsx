@@ -1,11 +1,12 @@
 import * as React from "react";
-import { EditIcon, GroupIcon, TrashIcon } from "outline-icons";
+import { EditIcon, GroupIcon, PaletteIcon, TrashIcon } from "outline-icons";
 import { useTranslation } from "react-i18next";
 import { useHistory } from "react-router-dom";
 import type Group from "~/models/Group";
 import {
   DeleteGroupDialog,
   EditGroupDialog,
+  GroupIconDialog,
 } from "~/scenes/Settings/components/GroupDialogs";
 import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
@@ -61,6 +62,21 @@ export function useGroupMenuActions(
     });
   }, [t, targetGroup, dialogs]);
 
+  const openIconDialog = React.useCallback(() => {
+    if (!targetGroup) {
+      return;
+    }
+    dialogs.openModal({
+      title: t("Edit icon"),
+      content: (
+        <GroupIconDialog
+          group={targetGroup}
+          onSubmit={dialogs.closeAllModals}
+        />
+      ),
+    });
+  }, [t, targetGroup, dialogs]);
+
   const openDeleteDialog = React.useCallback(() => {
     if (!targetGroup) {
       return;
@@ -101,6 +117,13 @@ export function useGroupMenuActions(
               perform: openEditDialog,
             }),
             createAction({
+              name: `${t("Edit icon")}…`,
+              icon: <PaletteIcon />,
+              section: GroupSection,
+              visible: can.update,
+              perform: openIconDialog,
+            }),
+            createAction({
               name: `${t("Delete")}…`,
               icon: <TrashIcon />,
               section: GroupSection,
@@ -133,6 +156,7 @@ export function useGroupMenuActions(
       options?.hideMembers,
       navigateToMembers,
       openEditDialog,
+      openIconDialog,
       openDeleteDialog,
     ]
   );
