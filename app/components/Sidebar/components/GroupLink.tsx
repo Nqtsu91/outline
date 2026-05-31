@@ -1,6 +1,7 @@
 import { observer } from "mobx-react";
 import { GroupIcon } from "outline-icons";
 import * as React from "react";
+import Icon from "@shared/components/Icon";
 import type Group from "~/models/Group";
 import { useLocationSidebarContext } from "~/hooks/useLocationSidebarContext";
 import Folder from "./Folder";
@@ -49,7 +50,17 @@ const GroupLink: React.FC<Props> = ({ group }) => {
     <Relative>
       <SidebarLink
         label={group.name}
-        icon={<GroupIcon />}
+        icon={
+          group.icon ? (
+            <Icon
+              value={group.icon}
+              color={group.color}
+              initial={group.name.charAt(0)}
+            />
+          ) : (
+            <GroupIcon />
+          )
+        }
         expanded={expanded}
         onClick={handleDisclosureClick}
         depth={0}

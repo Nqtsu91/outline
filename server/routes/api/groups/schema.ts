@@ -61,6 +61,10 @@ export const GroupsCreateSchema = z.object({
       .string()
       .max(GroupValidation.maxDescriptionLength)
       .optional(),
+    /** Icon identifier (SVG icon name, emoji, or custom UUID) */
+    icon: z.string().optional(),
+    /** Hex color string for the icon */
+    color: z.string().optional(),
     /** Optionally link this group to an external source. */
     externalId: z.string().optional(),
     /** Whether mentions are disabled for this group */
@@ -79,6 +83,10 @@ export const GroupsUpdateSchema = z.object({
       .string()
       .max(GroupValidation.maxDescriptionLength)
       .optional(),
+    /** Icon identifier (SVG icon name, emoji, or custom UUID) */
+    icon: z.string().optional().nullable(),
+    /** Hex color string for the icon */
+    color: z.string().optional().nullable(),
     /** Optionally link this group to an external source. */
     externalId: z.string().optional(),
     /** Whether mentions are disabled for this group */

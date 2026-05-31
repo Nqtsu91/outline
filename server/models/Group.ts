@@ -86,6 +86,14 @@ class Group extends ParanoidModel<
   @Column(DataType.BOOLEAN)
   disableMentions: boolean;
 
+  /** Icon identifier (SVG icon name, emoji, or custom UUID). */
+  @Column
+  icon: string;
+
+  /** Hex color for the icon (e.g. "#7C3AED"). */
+  @Column
+  color: string;
+
   static filterByMember(userId: string | undefined) {
     return userId
       ? this.scope({ method: ["withMembership", userId] })

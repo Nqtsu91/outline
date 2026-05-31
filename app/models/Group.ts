@@ -42,6 +42,14 @@ class Group extends Model implements Searchable {
   @observable
   disableMentions: boolean;
 
+  @Field
+  @observable
+  icon: string | undefined;
+
+  @Field
+  @observable
+  color: string | undefined;
+
   @observable
   externalGroup: ExternalGroupInfo | undefined;
 

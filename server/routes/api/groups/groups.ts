@@ -234,7 +234,7 @@ router.post(
   validate(T.GroupsCreateSchema),
   transaction(),
   async (ctx: APIContext<T.GroupsCreateReq>) => {
-    const { name, externalId, disableMentions } = ctx.input.body;
+    const { name, externalId, disableMentions, icon, color } = ctx.input.body;
     const { user } = ctx.state.auth;
     authorize(user, "createGroup", user.team);
 
@@ -242,6 +242,8 @@ router.post(
       name,
       externalId,
       disableMentions,
+      icon,
+      color,
       teamId: user.teamId,
       createdById: user.id,
     });
@@ -296,7 +298,12 @@ router.post(
       );
     }
 
-    await group.updateWithCtx(ctx, ctx.input.body);
+    const { id: _id, icon, color, ...rest } = ctx.input.body;
+    await group.updateWithCtx(ctx, {
+      ...rest,
+      ...(icon !== undefined ? { icon: icon ?? undefined } : {}),
+      ...(color !== undefined ? { color: color ?? undefined } : {}),
+    });
 
     ctx.body = {
       data: await presentGroup(group),
