@@ -61,7 +61,7 @@ function MultiplayerEditor(
   const { t } = useTranslation();
   const currentUser = useCurrentUser();
   const retryCount = useRef(0);
-  const { presence, auth, ui } = useStores();
+  const { presence, auth, ui, documents } = useStores();
   const [editorVersionBehind, setEditorVersionBehind] = useState(false);
   const [showCursorNames, setShowCursorNames] = useState(false);
   const [remoteProvider, setRemoteProvider] = useState<HocuspocusProvider>();
@@ -81,8 +81,32 @@ function MultiplayerEditor(
   useLayoutEffect(() => {
     const debug = env.ENVIRONMENT === "development";
     const name = `document.${documentId}`;
+
+    // Detect whether the local Yjs cache is stale compared to the server.
+    // If the document was edited on another client since the last local sync,
+    // wipe the IndexedDB state so we start from the authoritative server copy
+    // instead of merging a diverged snapshot (which can cause freezes or stale
+    // content being shown on first render).
+    const cacheKey = `outline.cache.${documentId}`;
+    const storedUpdatedAt = localStorage.getItem(cacheKey);
+    const serverUpdatedAt = documents.get(documentId)?.updatedAt;
+    const isCacheStale =
+      !!storedUpdatedAt &&
+      !!serverUpdatedAt &&
+      storedUpdatedAt !== serverUpdatedAt;
+
+    if (isCacheStale && typeof indexedDB !== "undefined") {
+      if (debug) {
+        Logger.debug(
+          "collaboration",
+          `stale local cache for ${documentId} (stored=${storedUpdatedAt}, server=${serverUpdatedAt}) — clearing IndexedDB`
+        );
+      }
+      window.indexedDB.deleteDatabase(name);
+    }
+
     const localProvider =
-      typeof indexedDB !== "undefined"
+      !isCacheStale && typeof indexedDB !== "undefined"
         ? new IndexeddbPersistence(name, ydoc)
         : undefined;
 
@@ -174,6 +198,11 @@ function MultiplayerEditor(
       setLocalSynced(!!ydoc.get("default")._start)
     );
     provider.on("synced", () => {
+      // Persist the current server updatedAt so future loads can detect staleness.
+      const latestUpdatedAt = documents.get(documentId)?.updatedAt;
+      if (latestUpdatedAt) {
+        localStorage.setItem(cacheKey, latestUpdatedAt);
+      }
       presence.touch(documentId, currentUser.id, false);
       setRemoteSynced(true);
       retryCount.current = 0;
@@ -240,6 +269,7 @@ function MultiplayerEditor(
     currentUser.id,
     isMounted,
     auth,
+    documents,
   ]);
 
   const user = useMemo(
