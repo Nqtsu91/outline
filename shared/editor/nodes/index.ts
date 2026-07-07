@@ -14,6 +14,9 @@ import TextColor from "../marks/TextColor";
 import Link from "../marks/Link";
 import TemplatePlaceholder from "../marks/Placeholder";
 import Strikethrough from "../marks/Strikethrough";
+import Subscript from "../marks/Subscript";
+import Superscript from "../marks/Superscript";
+import Tooltip from "../marks/Tooltip";
 import Underline from "../marks/Underline";
 import Attachment from "./Attachment";
 import Blockquote from "./Blockquote";
@@ -64,6 +67,8 @@ export const inlineExtensions: Nodes = [
   Italic,
   Underline,
   Strikethrough,
+  Superscript,
+  Subscript,
   History,
   TrailingNode,
   MaxLength,
@@ -114,6 +119,7 @@ export const richExtensions: Nodes = [
   HorizontalRule,
   Highlight,
   TextColor,
+  Tooltip,
   TemplatePlaceholder,
   Math,
   MathBlock,

@@ -21,6 +21,7 @@ import {
   TableSplitCellsIcon,
   PaletteIcon,
   CollapseIcon,
+  InfoIcon,
 } from "outline-icons";
 import { v4 as uuidv4 } from "uuid";
 import CellBackgroundColorPicker from "../components/CellBackgroundColorPicker";
@@ -57,6 +58,8 @@ import Highlight from "@shared/editor/marks/Highlight";
 import TextColor from "@shared/editor/marks/TextColor";
 import { DottedCircleIcon } from "~/components/Icons/DottedCircleIcon";
 import FontColorIcon from "~/components/Icons/FontColorIcon";
+import SuperscriptIcon from "~/components/Icons/SuperscriptIcon";
+import SubscriptIcon from "~/components/Icons/SubscriptIcon";
 
 export default function formattingMenuItems(
   state: EditorState,
@@ -128,6 +131,22 @@ export default function formattingMenuItems(
       icon: <StrikethroughIcon />,
       active: isMarkActive(schema.marks.strikethrough),
       visible: !isCodeBlock && (!isMobile || !isEmpty),
+    },
+    {
+      name: "sup",
+      tooltip: t("Superscript"),
+      shortcut: `${metaDisplay}+.`,
+      icon: <SuperscriptIcon />,
+      active: isMarkActive(schema.marks.sup),
+      visible: !isCodeBlock && !isMobile,
+    },
+    {
+      name: "sub",
+      tooltip: t("Subscript"),
+      shortcut: `${metaDisplay}+,`,
+      icon: <SubscriptIcon />,
+      active: isMarkActive(schema.marks.sub),
+      visible: !isCodeBlock && !isMobile,
     },
     {
       tooltip: t("Background color"),
@@ -544,6 +563,13 @@ export default function formattingMenuItems(
       attrs: { href: "" },
       active: isMarkActive(schema.marks.link, undefined, { exact: true }),
       visible: !isCodeBlock && (!isMobile || !isEmpty),
+    },
+    {
+      name: "addTooltip",
+      tooltip: t("Hover text"),
+      icon: <InfoIcon />,
+      active: isMarkActive(schema.marks.tooltip),
+      visible: !isCodeBlock && !isTableCell && (!isMobile || !isEmpty),
     },
     {
       name: "comment",

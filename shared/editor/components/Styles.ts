@@ -2616,6 +2616,12 @@ del {
   text-decoration: strikethrough;
 }
 
+abbr.tooltip {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
 @media print {
   .placeholder::before,
   .block-menu-trigger,

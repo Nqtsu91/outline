@@ -1,6 +1,8 @@
 import { observer } from "mobx-react";
 import { GroupIcon } from "outline-icons";
 import * as React from "react";
+import styled from "styled-components";
+import { s } from "@shared/styles";
 import Icon from "@shared/components/Icon";
 import type Group from "~/models/Group";
 import { useLocationSidebarContext } from "~/hooks/useLocationSidebarContext";
@@ -52,7 +54,7 @@ const GroupLink: React.FC<Props> = ({ group }) => {
   return (
     <Relative>
       <SidebarLink
-        label={group.name}
+        label={<GroupHeading>{group.name}</GroupHeading>}
         icon={
           group.icon ? (
             <Icon
@@ -93,5 +95,18 @@ const GroupLink: React.FC<Props> = ({ group }) => {
     </Relative>
   );
 };
+
+/**
+ * Group names read as section headings: brighter than page links, bold, and
+ * slightly larger, flush to the start of the row.
+ */
+const GroupHeading = styled.span`
+  display: block;
+  margin-inline-start: 0;
+  font-weight: 700;
+  font-size: 15px;
+  color: ${s("text")};
+  letter-spacing: 0.01em;
+`;
 
 export default observer(GroupLink);

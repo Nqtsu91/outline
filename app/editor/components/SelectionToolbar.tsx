@@ -38,6 +38,7 @@ import { useEditor } from "./EditorContext";
 import { MediaLinkEditor } from "./MediaLinkEditor";
 import FloatingToolbar from "./FloatingToolbar";
 import LinkEditor from "./LinkEditor";
+import TooltipEditor from "./TooltipEditor";
 import ToolbarMenu from "./ToolbarMenu";
 import { isModKey } from "@shared/utils/keyboard";
 
@@ -76,6 +77,7 @@ function useIsDragging(state: EditorState) {
 enum Toolbar {
   Link = "link",
   Media = "media",
+  Tooltip = "tooltip",
   Menu = "menu",
 }
 
@@ -98,6 +100,13 @@ export function SelectionToolbar(props: Props) {
     selection instanceof NodeSelection
       ? getMarkRangeNodeSelection(selection, state.schema.marks.link)
       : getMarkRange(selection.$from, state.schema.marks.link);
+
+  const tooltipMark =
+    selection instanceof NodeSelection
+      ? undefined
+      : state.schema.marks.tooltip
+        ? getMarkRange(selection.$from, state.schema.marks.tooltip)
+        : undefined;
 
   const isEmbedSelection =
     selection instanceof NodeSelection && selection.node.type.name === "embed";
@@ -308,6 +317,12 @@ export function SelectionToolbar(props: Props) {
         setActiveToolbar(Toolbar.Link);
       };
     }
+
+    if (item.name === "addTooltip") {
+      item.onClick = () => {
+        setActiveToolbar(Toolbar.Tooltip);
+      };
+    }
     return item;
   });
 
@@ -324,12 +339,26 @@ export function SelectionToolbar(props: Props) {
       active={isActive}
       ref={menuRef}
       width={
-        activeToolbar === Toolbar.Link || activeToolbar === Toolbar.Media
+        activeToolbar === Toolbar.Link ||
+        activeToolbar === Toolbar.Media ||
+        activeToolbar === Toolbar.Tooltip
           ? 336
           : undefined
       }
     >
-      {activeToolbar === Toolbar.Link ? (
+      {activeToolbar === Toolbar.Tooltip ? (
+        <TooltipEditor
+          key={`tooltip-${selection.anchor}`}
+          autoFocus
+          view={view}
+          mark={tooltipMark ? tooltipMark.mark : undefined}
+          onSave={() => setActiveToolbar(null)}
+          onRemove={() => setActiveToolbar(null)}
+          onEscape={() => setActiveToolbar(Toolbar.Menu)}
+          onClickOutside={handleClickOutsideLinkEditor}
+          onClickBack={() => setActiveToolbar(Toolbar.Menu)}
+        />
+      ) : activeToolbar === Toolbar.Link ? (
         <LinkEditor
           key={`link-${selection.anchor}`}
           autoFocus={autoFocusLinkInput}
