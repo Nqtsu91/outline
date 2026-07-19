@@ -105,11 +105,10 @@ function SidebarLink(
   const style = React.useMemo(
     () => ({
       // Collection children start at depth 2, so treat that as the flush base:
-      // top-level pages sit at the start and each nesting level adds 16px. The
-      // icon/no-icon offset keeps labels aligned across rows.
-      paddingInlineStart: `${
-        Math.max(0, (depth || 0) - 2) * 16 + (icon ? 8 : 28)
-      }px`,
+      // top-level pages sit at the start and each nesting level adds 16px.
+      // Indentation is icon-independent so a page always sits deeper than its
+      // parent regardless of whether either has an icon.
+      paddingInlineStart: `${Math.max(0, (depth || 0) - 2) * 16 + 8}px`,
       paddingInlineEnd: unreadBadge
         ? "32px"
         : hasDisclosure
@@ -286,7 +285,7 @@ const Actions = styled(EventBoundary)<{ $showActions?: boolean }>`
 // nesting doesn't push the icon and label to the right. It sits to the right of
 // the overflow menu within RightControls, so the two never overlap.
 const RightDisclosure = styled(Disclosure)`
-  position: static;
+  position: relative;
   inset-inline-start: auto;
   margin: 0;
   flex-shrink: 0;

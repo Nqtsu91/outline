@@ -324,7 +324,10 @@ const PageGroupLink = observer(function PageGroupLinkInner({
             activeDocument={activeDocument}
             prefetchDocument={prefetchDocument}
             isDraft={childNode.isDraft}
-            depth={depth + 1}
+            // A group is a section header, not a nesting level: its direct pages
+            // sit flush (same depth as the group), and their own sub-pages then
+            // indent beneath them.
+            depth={depth}
             index={childIndex}
             parentId={node.id}
           />
@@ -385,7 +388,7 @@ const GroupControls = styled.div`
 // The expand/collapse chevron, at the right edge of the row so the icon and
 // title stay flush to the start (GitBook-style).
 const RightDisclosure = styled(Disclosure)`
-  position: static;
+  position: relative;
   inset-inline-start: auto;
   margin: 0;
   flex-shrink: 0;
