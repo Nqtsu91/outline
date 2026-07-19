@@ -13,6 +13,7 @@ import Fade from "~/components/Fade";
 import NudeButton from "~/components/NudeButton";
 import Tooltip from "~/components/Tooltip";
 import useBoolean from "~/hooks/useBoolean";
+import useStores from "~/hooks/useStores";
 import { ActionContextProvider } from "~/hooks/useActionContext";
 import DropToImport from "./DropToImport";
 import Relative from "./Relative";
@@ -156,6 +157,7 @@ function DocumentRow({
   onClickIntent,
 }: DocumentRowProps) {
   const { t } = useTranslation();
+  const { documents } = useStores();
   const sidebarContext = useSidebarContext();
   const [isEditing, setIsEditingState] = React.useState(false);
   const setIsEditing = React.useCallback(
@@ -169,29 +171,44 @@ function DocumentRow({
     useBoolean();
   const newChildTitleRef = React.useRef<RefHandle>(null);
 
-  // Hover preview: if the document has a designated hover image, show a
-  // floating card with the image and title when hovering the sidebar row.
-  // Prefer the value threaded from the navigation node (available even when the
-  // full document isn't loaded), falling back to the loaded document.
-  const hoverImage = hoverImageProp ?? document?.hoverImage;
+  // Hover preview: show a floating card with the page's designated hover image
+  // and title when hovering the sidebar row. The hover image may come from the
+  // navigation node, the loaded document, or — if neither is known yet — be
+  // resolved by lazily fetching the document on hover.
+  const knownHoverImage = hoverImageProp ?? document?.hoverImage;
   const [hoverPreview, setHoverPreview] = React.useState<{
     top: number;
     left: number;
+    image: string;
   } | null>(null);
   const hoverTimer = React.useRef<ReturnType<typeof setTimeout>>();
 
   const handleRowMouseEnter = React.useCallback(
     (ev: React.MouseEvent<HTMLDivElement>) => {
-      if (!hoverImage || isDragging) {
+      if (isDragging || !documentId) {
         return;
       }
       const el = ev.currentTarget;
-      hoverTimer.current = setTimeout(() => {
+      hoverTimer.current = setTimeout(async () => {
+        let image = knownHoverImage ?? null;
+        // Only hit the network when the full document isn't loaded yet — a
+        // loaded document already tells us whether it has a hover image.
+        if (!image && !document) {
+          try {
+            const loaded = await documents.fetch(documentId);
+            image = loaded?.hoverImage ?? null;
+          } catch {
+            image = null;
+          }
+        }
+        if (!image) {
+          return;
+        }
         const rect = el.getBoundingClientRect();
-        setHoverPreview({ top: rect.top, left: rect.right + 8 });
+        setHoverPreview({ top: rect.top, left: rect.right + 8, image });
       }, 300);
     },
-    [hoverImage, isDragging]
+    [knownHoverImage, isDragging, documentId, documents, document]
   );
 
   const handleRowMouseLeave = React.useCallback(() => {
@@ -339,8 +356,8 @@ function DocumentRow({
           $isDragging={isDragging}
           $isMoving={isMoving}
           onKeyDown={handleKeyDown}
-          onMouseEnter={hoverImage ? handleRowMouseEnter : undefined}
-          onMouseLeave={hoverImage ? handleRowMouseLeave : undefined}
+          onMouseEnter={handleRowMouseEnter}
+          onMouseLeave={handleRowMouseLeave}
         >
           {dropToReparentRef ? (
             <div ref={dropToReparentRef}>{withImport}</div>
@@ -350,9 +367,9 @@ function DocumentRow({
         </Draggable>
         {cursorAfter}
       </Relative>
-      {hoverImage && hoverPreview && (
+      {hoverPreview && (
         <SidebarHoverImagePreview
-          image={hoverImage}
+          image={hoverPreview.image}
           title={labelText ?? document?.title ?? ""}
           top={hoverPreview.top}
           left={hoverPreview.left}

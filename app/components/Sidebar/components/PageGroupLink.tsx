@@ -246,18 +246,12 @@ const PageGroupLink = observer(function PageGroupLinkInner({
         {cursorBefore}
         <GroupInner
           ref={drag as React.Ref<HTMLDivElement>}
-          style={{ paddingInlineStart: `${depth * 16 - 8}px` }}
+          style={{
+            paddingInlineStart: `${Math.max(0, depth - 2) * 12 + 4}px`,
+          }}
         >
           <div ref={dropToReparent}>
             <GroupHeader>
-              <DisclosureWrapper>
-                {(hasChildren || isAddingNewChild) && (
-                  <Disclosure
-                    expanded={expanded}
-                    onClick={handleDisclosureClick}
-                  />
-                )}
-              </DisclosureWrapper>
               {document &&
                 (can.update ? (
                   <GroupIconWrapper>
@@ -307,6 +301,12 @@ const PageGroupLink = observer(function PageGroupLinkInner({
                     onClose={closeMenu}
                   />
                 </MenuWrapper>
+              )}
+              {(hasChildren || isAddingNewChild) && (
+                <RightDisclosure
+                  expanded={expanded}
+                  onClick={handleDisclosureClick}
+                />
               )}
             </GroupHeader>
           </div>
@@ -371,12 +371,19 @@ const GroupHeader = styled.div`
   }
 `;
 
-const DisclosureWrapper = styled.div`
+// The expand/collapse chevron, moved to the right edge of the row so the icon
+// and title stay flush to the start (GitBook-style).
+const RightDisclosure = styled(Disclosure)`
+  position: static;
+  inset-inline-start: auto;
+  margin: 0;
   flex-shrink: 0;
-  width: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  order: 10;
+  opacity: 0.5;
+
+  &:hover {
+    opacity: 1;
+  }
 `;
 
 const GroupIconWrapper = styled.div`

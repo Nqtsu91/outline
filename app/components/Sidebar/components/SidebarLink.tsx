@@ -3,7 +3,7 @@ import * as React from "react";
 import styled, { useTheme, css } from "styled-components";
 import breakpoint from "styled-components-breakpoint";
 import EventBoundary from "@shared/components/EventBoundary";
-import { ellipsis, hover, s } from "@shared/styles";
+import { ellipsis, s } from "@shared/styles";
 import { isMobile } from "@shared/utils/browser";
 import NudeButton from "~/components/NudeButton";
 import { UnreadBadge } from "~/components/UnreadBadge";
@@ -104,10 +104,14 @@ function SidebarLink(
   const { handleMouseEnter, handleMouseLeave } = useClickIntent(onClickIntent);
   const style = React.useMemo(
     () => ({
-      paddingInlineStart: `${(depth || 0) * 16 + (icon ? -8 : 12)}px`,
-      paddingInlineEnd: unreadBadge ? "32px" : undefined,
+      paddingInlineStart: `${(depth || 0) * 12 + (icon ? -8 : 12)}px`,
+      paddingInlineEnd: unreadBadge
+        ? "32px"
+        : hasDisclosure
+          ? "24px"
+          : undefined,
     }),
-    [depth, icon, unreadBadge]
+    [depth, icon, unreadBadge, hasDisclosure]
   );
 
   const unreadStyle = React.useMemo(
@@ -147,25 +151,24 @@ function SidebarLink(
     [onDisclosureClick, hasDisclosure]
   );
 
-  const DisclosureComponent = icon ? HiddenDisclosure : Disclosure;
-
   const innerContent = (
     <>
       <ContextMenu action={contextAction} ariaLabel={t("Link options")}>
         <Content>
-          {hasDisclosure && (
-            <DisclosureComponent
-              expanded={expanded}
-              onClick={handleDisclosureClick}
-              onMouseDown={stopPropagation}
-              tabIndex={-1}
-            />
-          )}
           {icon && <IconWrapper aria-hidden>{icon}</IconWrapper>}
           <Label $ellipsis={ellipsis}>{label}</Label>
           {unreadBadge && <UnreadBadge style={unreadStyle} />}
         </Content>
       </ContextMenu>
+      {hasDisclosure && (
+        <RightDisclosure
+          expanded={expanded}
+          onClick={handleDisclosureClick}
+          onMouseDown={stopPropagation}
+          tabIndex={-1}
+          $hasMenu={!!menu}
+        />
+      )}
       {menu && <Actions $showActions={$showActions}>{menu}</Actions>}
     </>
   );
@@ -261,12 +264,21 @@ const Actions = styled(EventBoundary)<{ $showActions?: boolean }>`
   }
 `;
 
-const HiddenDisclosure = styled(Disclosure)`
-  position: inherit;
-  inset-inline-start: initial;
-  display: none;
-  margin-inline-start: -2px;
-  margin-inline-end: 6px;
+// The expand/collapse chevron, positioned at the end of the row (GitBook-style)
+// so nesting doesn't push the icon and label to the right. Sits to the left of
+// the overflow menu when one is present.
+const RightDisclosure = styled(Disclosure)<{ $hasMenu?: boolean }>`
+  position: absolute;
+  inset-inline-start: auto;
+  inset-inline-end: ${(props) => (props.$hasMenu ? "28px" : "6px")};
+  top: 4px;
+  margin: 0;
+  opacity: 0.4;
+  transition: opacity 100ms ease;
+
+  &:hover {
+    opacity: 1;
+  }
 `;
 
 const Link = styled(NavLink)<{
@@ -329,17 +341,6 @@ const Link = styled(NavLink)<{
   svg {
     ${(props) => (props.$isActiveDrop ? `fill: ${props.theme.white};` : "")}
     transition: fill 50ms;
-  }
-
-  &: ${hover} {
-    ${HiddenDisclosure} {
-      display: block;
-    }
-    ${HiddenDisclosure} + ${IconWrapper} {
-      visibility: hidden;
-      opacity: 0;
-      width: 0;
-    }
   }
 
   ${breakpoint("tablet")`
