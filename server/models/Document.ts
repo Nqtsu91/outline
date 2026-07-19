@@ -337,6 +337,17 @@ class Document extends ArchivableModel<
   color: string | null;
 
   /**
+   * The URL of an image within the document to show as a preview when hovering
+   * the document in the sidebar. The image still displays normally in the body.
+   */
+  @Length({
+    max: 4096,
+    msg: `hoverImage must be 4096 characters or less`,
+  })
+  @Column
+  hoverImage: string | null;
+
+  /**
    * The content of the document as Markdown.
    *
    * @deprecated Use `content` instead, or `DocumentHelper.toMarkdown` if exporting lossy markdown.

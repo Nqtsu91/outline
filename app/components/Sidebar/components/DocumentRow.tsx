@@ -16,6 +16,7 @@ import useBoolean from "~/hooks/useBoolean";
 import { ActionContextProvider } from "~/hooks/useActionContext";
 import DropToImport from "./DropToImport";
 import Relative from "./Relative";
+import SidebarHoverImagePreview from "./SidebarHoverImagePreview";
 import SidebarLink from "./SidebarLink";
 import type { SidebarContextType } from "./SidebarContext";
 import { useSidebarContext } from "./SidebarContext";
@@ -165,6 +166,45 @@ function DocumentRow({
     useBoolean();
   const newChildTitleRef = React.useRef<RefHandle>(null);
 
+  // Hover preview: if the document has a designated hover image, show a
+  // floating card with the image and title when hovering the sidebar row.
+  const hoverImage = document?.hoverImage;
+  const [hoverPreview, setHoverPreview] = React.useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const hoverTimer = React.useRef<ReturnType<typeof setTimeout>>();
+
+  const handleRowMouseEnter = React.useCallback(
+    (ev: React.MouseEvent<HTMLDivElement>) => {
+      if (!hoverImage || isDragging) {
+        return;
+      }
+      const el = ev.currentTarget;
+      hoverTimer.current = setTimeout(() => {
+        const rect = el.getBoundingClientRect();
+        setHoverPreview({ top: rect.top, left: rect.right + 8 });
+      }, 300);
+    },
+    [hoverImage, isDragging]
+  );
+
+  const handleRowMouseLeave = React.useCallback(() => {
+    if (hoverTimer.current) {
+      clearTimeout(hoverTimer.current);
+    }
+    setHoverPreview(null);
+  }, []);
+
+  React.useEffect(
+    () => () => {
+      if (hoverTimer.current) {
+        clearTimeout(hoverTimer.current);
+      }
+    },
+    []
+  );
+
   const handleKeyDown = React.useCallback(
     (ev: React.KeyboardEvent) => {
       if (!hasChildren) {
@@ -294,6 +334,8 @@ function DocumentRow({
           $isDragging={isDragging}
           $isMoving={isMoving}
           onKeyDown={handleKeyDown}
+          onMouseEnter={hoverImage ? handleRowMouseEnter : undefined}
+          onMouseLeave={hoverImage ? handleRowMouseLeave : undefined}
         >
           {dropToReparentRef ? (
             <div ref={dropToReparentRef}>{withImport}</div>
@@ -303,6 +345,14 @@ function DocumentRow({
         </Draggable>
         {cursorAfter}
       </Relative>
+      {hoverImage && hoverPreview && (
+        <SidebarHoverImagePreview
+          image={hoverImage}
+          title={labelText ?? document?.title ?? ""}
+          top={hoverPreview.top}
+          left={hoverPreview.left}
+        />
+      )}
       {isAddingNewChild && onCreateChild && (
         <SidebarLink
           isActive={() => true}

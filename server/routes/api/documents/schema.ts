@@ -439,6 +439,9 @@ export const DocumentsCreateSchema = BaseSchema.extend({
       .regex(ValidateColor.regex, { message: ValidateColor.message })
       .nullish(),
 
+    /** URL of an image within the document to preview on sidebar hover */
+    hoverImage: z.string().max(4096).nullish(),
+
     /** Boolean to denote if the doc should be published */
     publish: z.boolean().optional(),
 

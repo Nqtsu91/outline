@@ -17,9 +17,13 @@ import {
   isTableSelected,
 } from "@shared/editor/queries/table";
 import type { MenuItem } from "@shared/editor/types";
+import { ImageIcon } from "outline-icons";
+import { toast } from "sonner";
+import { useOptionalDocumentContext } from "~/components/DocumentContext";
 import useBoolean from "~/hooks/useBoolean";
 import useEventListener from "~/hooks/useEventListener";
 import useMobile from "~/hooks/useMobile";
+import useStores from "~/hooks/useStores";
 import getAttachmentMenuItems from "../menus/attachment";
 import getCodeMenuItems from "../menus/code";
 import getDividerMenuItems from "../menus/divider";
@@ -85,6 +89,8 @@ export function SelectionToolbar(props: Props) {
   const { readOnly = false } = props;
   const { view, extensions, commands } = useEditor();
   const { t } = useTranslation();
+  const { documents } = useStores();
+  const documentContext = useOptionalDocumentContext();
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const isMobile = useMobile();
   const isActive = props.isActive || isMobile;
@@ -325,6 +331,43 @@ export function SelectionToolbar(props: Props) {
     }
     return item;
   });
+
+  // Allow designating the selected image as the document's sidebar hover
+  // preview. Only available inside a real document (not comment editors) and
+  // for images that have a resolvable source.
+  if (
+    isImageSelection &&
+    !readOnly &&
+    documentContext?.document &&
+    selection instanceof NodeSelection
+  ) {
+    const imageSrc = selection.node.attrs.src as string | undefined;
+    const currentDocument = documentContext.document;
+
+    if (imageSrc) {
+      const isHoverImage = currentDocument.hoverImage === imageSrc;
+      items = [
+        ...items,
+        { name: "separator" },
+        {
+          name: "setHoverImage",
+          tooltip: isHoverImage
+            ? t("Remove hover preview")
+            : t("Set as hover preview"),
+          icon: <ImageIcon />,
+          active: () => isHoverImage,
+          onClick: () => {
+            void documents
+              .update({
+                id: currentDocument.id,
+                hoverImage: isHoverImage ? null : imageSrc,
+              })
+              .catch((err: Error) => toast.error(err.message));
+          },
+        },
+      ];
+    }
+  }
 
   const handleClickOutsideLinkEditor = (ev: MouseEvent | TouchEvent) => {
     if (ev.target instanceof Element && ev.target.closest(".image-wrapper")) {

@@ -88,6 +88,12 @@ export const useDocumentContext = () => {
   return ctx;
 };
 
+/**
+ * Like {@link useDocumentContext} but returns null instead of throwing when
+ * used outside of a document (for example inside a comment editor).
+ */
+export const useOptionalDocumentContext = () => useContext(Context);
+
 export const DocumentContextProvider = ({
   children,
 }: PropsWithChildren<unknown>) => {

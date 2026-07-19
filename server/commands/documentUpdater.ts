@@ -13,6 +13,8 @@ type Props = {
   icon?: string | null;
   /** The document icon's color */
   color?: string | null;
+  /** The URL of an image to preview when hovering the document in the sidebar */
+  hoverImage?: string | null;
   /** The new text content */
   text?: string;
   /** Whether the editing session is complete */
@@ -49,6 +51,7 @@ export default async function documentUpdater(
     title,
     icon,
     color,
+    hoverImage,
     text,
     editorVersion,
     templateId,
@@ -73,6 +76,9 @@ export default async function documentUpdater(
   }
   if (color !== undefined) {
     document.color = color;
+  }
+  if (hoverImage !== undefined) {
+    document.hoverImage = hoverImage;
   }
   if (editorVersion) {
     document.editorVersion = editorVersion;

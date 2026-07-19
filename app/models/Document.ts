@@ -149,6 +149,14 @@ export default class Document extends ArchivableModel implements Searchable {
   color?: string | null;
 
   /**
+   * The URL of an image within the document to preview when hovering the
+   * document in the sidebar. The image still displays normally in the body.
+   */
+  @Field
+  @observable
+  hoverImage?: string | null;
+
+  /**
    * Whether the document layout is displayed full page width.
    */
   @Field

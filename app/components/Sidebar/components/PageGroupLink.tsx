@@ -3,7 +3,9 @@ import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { useHistory } from "react-router-dom";
 import styled from "styled-components";
+import Icon from "@shared/components/Icon";
 import { s } from "@shared/styles";
+import { colorPalette } from "@shared/utils/collections";
 import { UserPreference } from "@shared/types";
 import type { NavigationNode } from "@shared/types";
 import { ProsemirrorHelper } from "@shared/utils/ProsemirrorHelper";
@@ -18,6 +20,9 @@ import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
 import DocumentMenu from "~/menus/DocumentMenu";
 import { documentEditPath } from "~/utils/routeHelpers";
+import lazyWithRetry from "~/utils/lazyWithRetry";
+
+const IconPicker = lazyWithRetry(() => import("~/components/IconPicker"));
 import {
   useDragDocument,
   useDropToReorderDocument,
@@ -95,8 +100,24 @@ const PageGroupLink = observer(function PageGroupLinkInner({
 
   const handleTitleChange = React.useCallback(
     async (value: string) => {
-      if (!document) return;
+      if (!document) {
+        return;
+      }
       await documents.update({ id: document.id, title: value });
+    },
+    [documents, document]
+  );
+
+  const handleIconChange = React.useCallback(
+    async (newIcon: string | null, newColor: string | null) => {
+      if (!document) {
+        return;
+      }
+      await documents.update({
+        id: document.id,
+        icon: newIcon,
+        color: newColor,
+      });
     },
     [documents, document]
   );
@@ -159,7 +180,9 @@ const PageGroupLink = observer(function PageGroupLinkInner({
 
   const [{ isOverReorder: isOverReorderAbove }, dropToReorderAbove] =
     useDropToReorderDocument(node, collection, (item) => {
-      if (!collection) return;
+      if (!collection) {
+        return;
+      }
       return {
         documentId: item.id,
         collectionId: collection.id,
@@ -170,7 +193,9 @@ const PageGroupLink = observer(function PageGroupLinkInner({
 
   const [{ isOverReorder, isDraggingAnyDocument }, dropToReorder] =
     useDropToReorderDocument(node, collection, (item) => {
-      if (!collection) return;
+      if (!collection) {
+        return;
+      }
       if (expansion.isExpanded(node.id)) {
         return {
           documentId: item.id,
@@ -201,6 +226,16 @@ const PageGroupLink = observer(function PageGroupLinkInner({
       <DropCursor isActiveDrop={isOverReorder} innerRef={dropToReorder} />
     ) : undefined;
 
+  const groupIcon = document?.icon ?? node.icon ?? null;
+  const groupColor =
+    document?.color ?? node.color ?? (colorPalette[0] as string);
+  const groupInitial = (document?.title ?? node.title ?? "G")
+    .charAt(0)
+    .toUpperCase();
+  const groupIconFallback = groupIcon ? (
+    <Icon value={groupIcon} initial={groupInitial} color={groupColor} size={20} />
+  ) : null;
+
   return (
     <>
       <GroupRow
@@ -223,6 +258,27 @@ const PageGroupLink = observer(function PageGroupLinkInner({
                   />
                 )}
               </DisclosureWrapper>
+              {document &&
+                (can.update ? (
+                  <GroupIconWrapper>
+                    <React.Suspense fallback={groupIconFallback}>
+                      <IconPicker
+                        icon={groupIcon}
+                        color={groupColor}
+                        initial={groupInitial}
+                        size={20}
+                        popoverPosition="bottom-start"
+                        onChange={handleIconChange}
+                        borderOnHover
+                        allowDelete
+                      />
+                    </React.Suspense>
+                  </GroupIconWrapper>
+                ) : groupIcon ? (
+                  <GroupIconWrapper aria-hidden>
+                    {groupIconFallback}
+                  </GroupIconWrapper>
+                ) : null)}
               <GroupLabel onDoubleClick={() => can.update && setIsEditing(true)}>
                 <EditableTitle
                   title={document?.title ?? node.title ?? t("New Group")}
@@ -323,14 +379,21 @@ const DisclosureWrapper = styled.div`
   justify-content: center;
 `;
 
+const GroupIconWrapper = styled.div`
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-inline-end: 2px;
+`;
+
 const GroupLabel = styled.div`
   flex: 1;
   min-width: 0;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: ${s("textTertiary")};
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: ${s("text")};
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

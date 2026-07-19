@@ -65,6 +65,7 @@ async function presentDocument(
     text,
     icon: document.icon,
     color: document.color,
+    hoverImage: document.hoverImage,
     type: document.type,
     tasks: {
       completed: 0,
