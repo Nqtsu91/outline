@@ -247,7 +247,7 @@ const PageGroupLink = observer(function PageGroupLinkInner({
         <GroupInner
           ref={drag as React.Ref<HTMLDivElement>}
           style={{
-            paddingInlineStart: `${Math.max(0, depth - 2) * 12 + 4}px`,
+            paddingInlineStart: `${Math.max(0, depth - 2) * 16 + 6}px`,
           }}
         >
           <div ref={dropToReparent}>
@@ -284,30 +284,32 @@ const PageGroupLink = observer(function PageGroupLinkInner({
                   ref={editableTitleRef}
                 />
               </GroupLabel>
-              {!isEditing && !isDragging && can.createChildDocument && (
-                <AddButton
-                  onClick={handleAddChild}
-                  title={t("New page in group")}
-                >
-                  +
-                </AddButton>
-              )}
-              {!isEditing && !isDragging && document && (
-                <MenuWrapper $menuOpen={isMenuOpen}>
-                  <DocumentMenu
-                    document={document}
-                    onRename={handleRename}
-                    onOpen={setIsMenuOpen}
-                    onClose={closeMenu}
+              <GroupControls>
+                {!isEditing && !isDragging && can.createChildDocument && (
+                  <AddButton
+                    onClick={handleAddChild}
+                    title={t("New page in group")}
+                  >
+                    +
+                  </AddButton>
+                )}
+                {!isEditing && !isDragging && document && (
+                  <MenuWrapper $menuOpen={isMenuOpen}>
+                    <DocumentMenu
+                      document={document}
+                      onRename={handleRename}
+                      onOpen={setIsMenuOpen}
+                      onClose={closeMenu}
+                    />
+                  </MenuWrapper>
+                )}
+                {(hasChildren || isAddingNewChild) && (
+                  <RightDisclosure
+                    expanded={expanded}
+                    onClick={handleDisclosureClick}
                   />
-                </MenuWrapper>
-              )}
-              {(hasChildren || isAddingNewChild) && (
-                <RightDisclosure
-                  expanded={expanded}
-                  onClick={handleDisclosureClick}
-                />
-              )}
+                )}
+              </GroupControls>
             </GroupHeader>
           </div>
         </GroupInner>
@@ -371,14 +373,22 @@ const GroupHeader = styled.div`
   }
 `;
 
-// The expand/collapse chevron, moved to the right edge of the row so the icon
-// and title stay flush to the start (GitBook-style).
+// Right-aligned cluster holding the add-page button, overflow menu and the
+// expand chevron in a single row so they never overlap.
+const GroupControls = styled.div`
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+`;
+
+// The expand/collapse chevron, at the right edge of the row so the icon and
+// title stay flush to the start (GitBook-style).
 const RightDisclosure = styled(Disclosure)`
   position: static;
   inset-inline-start: auto;
   margin: 0;
   flex-shrink: 0;
-  order: 10;
   opacity: 0.5;
 
   &:hover {
@@ -434,6 +444,11 @@ const AddButton = styled.button`
   align-items: center;
   justify-content: center;
   border-radius: 4px;
+
+  ${GroupHeader}:hover & {
+    opacity: 1;
+  }
+
   &:hover {
     background: ${s("sidebarActiveBackground")};
     color: ${s("text")};

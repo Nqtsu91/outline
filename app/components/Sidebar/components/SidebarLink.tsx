@@ -104,7 +104,12 @@ function SidebarLink(
   const { handleMouseEnter, handleMouseLeave } = useClickIntent(onClickIntent);
   const style = React.useMemo(
     () => ({
-      paddingInlineStart: `${(depth || 0) * 12 + (icon ? -8 : 12)}px`,
+      // Collection children start at depth 2, so treat that as the flush base:
+      // top-level pages sit at the start and each nesting level adds 16px. The
+      // icon/no-icon offset keeps labels aligned across rows.
+      paddingInlineStart: `${
+        Math.max(0, (depth || 0) - 2) * 16 + (icon ? 8 : 28)
+      }px`,
       paddingInlineEnd: unreadBadge
         ? "32px"
         : hasDisclosure
@@ -160,16 +165,19 @@ function SidebarLink(
           {unreadBadge && <UnreadBadge style={unreadStyle} />}
         </Content>
       </ContextMenu>
-      {hasDisclosure && (
-        <RightDisclosure
-          expanded={expanded}
-          onClick={handleDisclosureClick}
-          onMouseDown={stopPropagation}
-          tabIndex={-1}
-          $hasMenu={!!menu}
-        />
+      {(hasDisclosure || menu) && (
+        <RightControls>
+          {menu && <Actions $showActions={$showActions}>{menu}</Actions>}
+          {hasDisclosure && (
+            <RightDisclosure
+              expanded={expanded}
+              onClick={handleDisclosureClick}
+              onMouseDown={stopPropagation}
+              tabIndex={-1}
+            />
+          )}
+        </RightControls>
       )}
-      {menu && <Actions $showActions={$showActions}>{menu}</Actions>}
     </>
   );
 
@@ -237,12 +245,22 @@ const Content = styled.span`
   min-width: 0;
 `;
 
+// Right-aligned cluster holding the overflow menu and the expand chevron so
+// they lay out in a row and never overlap each other.
+const RightControls = styled.span`
+  position: absolute;
+  inset-inline-end: 4px;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+`;
+
 const Actions = styled(EventBoundary)<{ $showActions?: boolean }>`
   display: inline-flex;
+  align-items: center;
   visibility: ${(props) => (props.$showActions ? "visible" : "hidden")};
-  position: absolute;
-  top: 3px;
-  inset-inline-end: 4px;
   gap: 4px;
   color: ${s("textTertiary")};
   transition: opacity 50ms;
@@ -264,15 +282,14 @@ const Actions = styled(EventBoundary)<{ $showActions?: boolean }>`
   }
 `;
 
-// The expand/collapse chevron, positioned at the end of the row (GitBook-style)
-// so nesting doesn't push the icon and label to the right. Sits to the left of
-// the overflow menu when one is present.
-const RightDisclosure = styled(Disclosure)<{ $hasMenu?: boolean }>`
-  position: absolute;
+// The expand/collapse chevron, pinned at the end of the row (GitBook-style) so
+// nesting doesn't push the icon and label to the right. It sits to the right of
+// the overflow menu within RightControls, so the two never overlap.
+const RightDisclosure = styled(Disclosure)`
+  position: static;
   inset-inline-start: auto;
-  inset-inline-end: ${(props) => (props.$hasMenu ? "28px" : "6px")};
-  top: 4px;
   margin: 0;
+  flex-shrink: 0;
   opacity: 0.4;
   transition: opacity 100ms ease;
 
