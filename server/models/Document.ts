@@ -470,7 +470,8 @@ class Document extends ArchivableModel<
       !(
         model.changed("title") ||
         model.changed("icon") ||
-        model.changed("color")
+        model.changed("color") ||
+        model.changed("hoverImage")
       ) ||
       !model.collectionId
     ) {
@@ -1342,6 +1343,7 @@ class Document extends ArchivableModel<
       url: this.type === "group" ? undefined : this.url,
       icon: isNil(this.icon) ? undefined : this.icon,
       color: isNil(this.color) ? undefined : this.color,
+      hoverImage: isNil(this.hoverImage) ? undefined : this.hoverImage,
       type: this.type === "group" ? NavigationNodeType.Group : NavigationNodeType.Document,
       children,
     };

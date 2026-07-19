@@ -446,6 +446,7 @@ export type NavigationNode = {
   emoji?: string;
   icon?: string;
   color?: string;
+  hoverImage?: string | null;
   children: NavigationNode[];
   isDraft?: boolean;
   collectionId?: string;

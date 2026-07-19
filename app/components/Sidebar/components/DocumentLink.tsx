@@ -324,6 +324,7 @@ const DocumentLinkInner = observer(function DocumentLinkInner({
       isDraft={isDraft}
       scrollIntoViewIfNeeded={sidebarContext === "collections"}
       icon={iconElement}
+      hoverImage={node.hoverImage ?? document?.hoverImage}
       canEdit={canUpdate}
       labelText={title}
       onTitleChange={handleTitleChange}

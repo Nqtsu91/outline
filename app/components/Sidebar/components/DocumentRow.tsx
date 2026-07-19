@@ -40,6 +40,8 @@ export type DocumentRowProps = {
 
   /** Icon displayed to the left of the label. */
   icon?: React.ReactNode;
+  /** URL of an image to preview in a floating card when hovering the row. */
+  hoverImage?: string | null;
   /** Displays a small unread badge to the right of the label. */
   unreadBadge?: boolean;
 
@@ -122,6 +124,7 @@ function DocumentRow({
   isDraft,
   scrollIntoViewIfNeeded,
   icon,
+  hoverImage: hoverImageProp,
   unreadBadge,
   label,
   canEdit,
@@ -168,7 +171,9 @@ function DocumentRow({
 
   // Hover preview: if the document has a designated hover image, show a
   // floating card with the image and title when hovering the sidebar row.
-  const hoverImage = document?.hoverImage;
+  // Prefer the value threaded from the navigation node (available even when the
+  // full document isn't loaded), falling back to the loaded document.
+  const hoverImage = hoverImageProp ?? document?.hoverImage;
   const [hoverPreview, setHoverPreview] = React.useState<{
     top: number;
     left: number;
