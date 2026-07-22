@@ -28,6 +28,7 @@ import {
   CopyIcon,
   PadlockIcon,
   GlobeIcon,
+  EyeIcon,
   LogoutIcon,
   CaseSensitiveIcon,
   RestoreIcon,
@@ -477,6 +478,63 @@ export const unpublishDocument = createAction({
         documentName: document.noun,
       })
     );
+  },
+});
+
+export const hideDocumentFromPublic = createAction({
+  name: ({ t }) => t("Hide from public link"),
+  analyticsName: "Hide document from public link",
+  section: ActiveDocumentSection,
+  icon: <GlobeIcon />,
+  keywords: "share public link hide exclude",
+  visible: ({ activeDocumentId, stores }) => {
+    if (!activeDocumentId) {
+      return false;
+    }
+    const document = stores.documents.get(activeDocumentId);
+    return (
+      !!document &&
+      !document.sharedHidden &&
+      stores.policies.abilities(activeDocumentId).update
+    );
+  },
+  perform: async ({ activeDocumentId, stores, t }) => {
+    if (!activeDocumentId) {
+      return;
+    }
+    await stores.documents.update({
+      id: activeDocumentId,
+      sharedHidden: true,
+    });
+    toast.success(t("Hidden from public link"));
+  },
+});
+
+export const showDocumentOnPublic = createAction({
+  name: ({ t }) => t("Show on public link"),
+  analyticsName: "Show document on public link",
+  section: ActiveDocumentSection,
+  icon: <EyeIcon />,
+  keywords: "share public link show include",
+  visible: ({ activeDocumentId, stores }) => {
+    if (!activeDocumentId) {
+      return false;
+    }
+    const document = stores.documents.get(activeDocumentId);
+    return (
+      !!document?.sharedHidden &&
+      stores.policies.abilities(activeDocumentId).update
+    );
+  },
+  perform: async ({ activeDocumentId, stores, t }) => {
+    if (!activeDocumentId) {
+      return;
+    }
+    await stores.documents.update({
+      id: activeDocumentId,
+      sharedHidden: false,
+    });
+    toast.success(t("Shown on public link"));
   },
 });
 

@@ -447,6 +447,7 @@ export type NavigationNode = {
   icon?: string;
   color?: string;
   hoverImage?: string | null;
+  sharedHidden?: boolean;
   children: NavigationNode[];
   isDraft?: boolean;
   collectionId?: string;

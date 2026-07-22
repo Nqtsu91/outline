@@ -278,6 +278,9 @@ export const DocumentsUpdateSchema = BaseSchema.extend({
     /** URL of an image within the document to preview on sidebar hover */
     hoverImage: z.string().max(4096).nullish(),
 
+    /** Whether the doc (and its sub-documents) is hidden from public share links */
+    sharedHidden: z.boolean().optional(),
+
     /** Boolean to denote if the doc should occupy full width */
     fullWidth: z.boolean().optional(),
 

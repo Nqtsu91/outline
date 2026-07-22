@@ -66,6 +66,7 @@ async function presentDocument(
     icon: document.icon,
     color: document.color,
     hoverImage: document.hoverImage,
+    sharedHidden: document.sharedHidden,
     type: document.type,
     tasks: {
       completed: 0,

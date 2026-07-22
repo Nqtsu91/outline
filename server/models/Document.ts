@@ -348,6 +348,14 @@ class Document extends ArchivableModel<
   hoverImage: string | null;
 
   /**
+   * Whether this document (and its sub-documents) is hidden from public share
+   * links. It still appears normally for authenticated members.
+   */
+  @Default(false)
+  @Column
+  sharedHidden: boolean;
+
+  /**
    * The content of the document as Markdown.
    *
    * @deprecated Use `content` instead, or `DocumentHelper.toMarkdown` if exporting lossy markdown.
@@ -471,7 +479,8 @@ class Document extends ArchivableModel<
         model.changed("title") ||
         model.changed("icon") ||
         model.changed("color") ||
-        model.changed("hoverImage")
+        model.changed("hoverImage") ||
+        model.changed("sharedHidden")
       ) ||
       !model.collectionId
     ) {
@@ -1344,6 +1353,7 @@ class Document extends ArchivableModel<
       icon: isNil(this.icon) ? undefined : this.icon,
       color: isNil(this.color) ? undefined : this.color,
       hoverImage: isNil(this.hoverImage) ? undefined : this.hoverImage,
+      sharedHidden: this.sharedHidden || undefined,
       type: this.type === "group" ? NavigationNodeType.Group : NavigationNodeType.Document,
       children,
     };

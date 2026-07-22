@@ -98,6 +98,14 @@ export async function loadPublicShare({
       associatedCollection?.getDocumentTree(share.document.id) ?? null;
   }
 
+  // Remove any documents (and their sub-documents) that have been marked as
+  // hidden from public share links. This both drops them from the public
+  // navigation and, because access is validated against the shared tree,
+  // prevents them from being opened directly by URL.
+  if (sharedTree) {
+    sharedTree = pruneHiddenFromSharedTree(sharedTree);
+  }
+
   if (sharedTree && share.domain) {
     sharedTree.url = "";
   }
@@ -254,4 +262,23 @@ export function getAllIdsInSharedTree(
     ids.push(...getAllIdsInSharedTree(child));
   }
   return ids;
+}
+
+/**
+ * Returns a copy of the shared tree with any documents flagged as hidden from
+ * public shares — along with their entire sub-tree — removed. The root node is
+ * always kept as it is the document/collection being shared.
+ *
+ * @param node The navigation node representing the shared tree.
+ * @returns A pruned copy of the navigation node.
+ */
+export function pruneHiddenFromSharedTree(
+  node: NavigationNode
+): NavigationNode {
+  return {
+    ...node,
+    children: node.children
+      .filter((child) => !child.sharedHidden)
+      .map(pruneHiddenFromSharedTree),
+  };
 }

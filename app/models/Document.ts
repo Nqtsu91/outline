@@ -157,6 +157,14 @@ export default class Document extends ArchivableModel implements Searchable {
   hoverImage?: string | null;
 
   /**
+   * Whether this document (and its sub-documents) is hidden from public share
+   * links. It still appears normally for authenticated members.
+   */
+  @Field
+  @observable
+  sharedHidden?: boolean;
+
+  /**
    * Whether the document layout is displayed full page width.
    */
   @Field

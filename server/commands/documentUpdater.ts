@@ -15,6 +15,8 @@ type Props = {
   color?: string | null;
   /** The URL of an image to preview when hovering the document in the sidebar */
   hoverImage?: string | null;
+  /** Whether the document is hidden from public share links */
+  sharedHidden?: boolean;
   /** The new text content */
   text?: string;
   /** Whether the editing session is complete */
@@ -52,6 +54,7 @@ export default async function documentUpdater(
     icon,
     color,
     hoverImage,
+    sharedHidden,
     text,
     editorVersion,
     templateId,
@@ -79,6 +82,9 @@ export default async function documentUpdater(
   }
   if (hoverImage !== undefined) {
     document.hoverImage = hoverImage;
+  }
+  if (sharedHidden !== undefined) {
+    document.sharedHidden = sharedHidden;
   }
   if (editorVersion) {
     document.editorVersion = editorVersion;
