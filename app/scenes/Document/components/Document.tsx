@@ -31,6 +31,7 @@ import { client } from "~/utils/ApiClient";
 import { emojiToUrl } from "~/utils/emoji";
 import { documentHistoryPath, documentEditPath } from "~/utils/routeHelpers";
 import { useDocumentSave } from "../hooks/useDocumentSave";
+import CanvasEditor from "./AsyncCanvasEditor";
 import Container from "./Container";
 import Contents from "./Contents";
 import Editor from "./Editor";
@@ -366,6 +367,14 @@ function DocumentScene({
                     revision={revision}
                     id={revision.id}
                   />
+                ) : document.type === "canvas" ? (
+                  <>
+                    <Notices document={document} readOnly={readOnly} />
+                    <CanvasEditor
+                      document={document}
+                      readOnly={readOnly || !abilities.update}
+                    />
+                  </>
                 ) : (
                   <>
                     <Notices document={document} readOnly={readOnly} />

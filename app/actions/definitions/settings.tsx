@@ -62,4 +62,6 @@ export const changeTheme = createActionWithChildren({
   children: [changeToLightTheme, changeToDarkTheme, changeToSystemTheme],
 });
 
-export const rootSettingsActions = [changeTheme, toggleTheme];
+// Theme switching is intentionally omitted — the light theme is disabled and
+// the app always uses the dark theme.
+export const rootSettingsActions = [];

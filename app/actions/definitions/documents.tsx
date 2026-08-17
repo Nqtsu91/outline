@@ -47,6 +47,7 @@ import type UserMembership from "~/models/UserMembership";
 import { client } from "~/utils/ApiClient";
 import DocumentDelete from "~/scenes/DocumentDelete";
 import { ProsemirrorHelper } from "~/models/helpers/ProsemirrorHelper";
+import { ProsemirrorHelper as SharedProsemirrorHelper } from "@shared/utils/ProsemirrorHelper";
 import DocumentPermanentDelete from "~/scenes/DocumentPermanentDelete";
 import DocumentPublish from "~/scenes/DocumentPublish";
 import DeleteDocumentsInTrash from "~/scenes/Trash/components/DeleteDocumentsInTrash";
@@ -208,6 +209,40 @@ export const createDraftDocument = createInternalLinkAction({
     pathname: newDocumentPath(),
     state: { sidebarContext },
   }),
+});
+
+export const createCanvas = createAction({
+  name: ({ t }) => t("New canvas"),
+  analyticsName: "New canvas",
+  section: DocumentSection,
+  icon: <ShapesIcon />,
+  keywords: "canvas whiteboard draw diagram board sketch infinite",
+  visible: ({ currentTeamId, activeCollectionId, stores }) => {
+    if (
+      activeCollectionId &&
+      !stores.policies.abilities(activeCollectionId).createDocument
+    ) {
+      return false;
+    }
+    return (
+      !!currentTeamId && stores.policies.abilities(currentTeamId).createDocument
+    );
+  },
+  perform: async ({ activeCollectionId, sidebarContext, stores }) => {
+    const document = await stores.documents.create(
+      {
+        collectionId: activeCollectionId ?? undefined,
+        title: "",
+        type: "canvas",
+        data: SharedProsemirrorHelper.getEmptyDocument(),
+      },
+      { publish: true }
+    );
+    history.push({
+      pathname: document.path,
+      state: { sidebarContext },
+    });
+  },
 });
 
 /**
@@ -1587,6 +1622,7 @@ export const rootDocumentActions = [
   archiveDocument,
   createDocument,
   createDraftDocument,
+  createCanvas,
   createNewDocument,
   createNestedDocument,
   createTemplateFromDocument,

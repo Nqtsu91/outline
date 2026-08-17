@@ -1149,6 +1149,21 @@ router.post(
         direction: direction as DirectionFilter,
         usePopularityBoost: false,
       });
+
+      // Exclude any documents that have been hidden from the public share (and
+      // their sub-documents) so they can't be discovered through search. The
+      // shared tree is already pruned of hidden documents in loadPublicShare.
+      const allowedDocumentIds = new Set(
+        getAllIdsInSharedTree(result.sharedTree)
+      );
+      const beforeCount = response.results.length;
+      response.results = response.results.filter((r) =>
+        allowedDocumentIds.has(r.document.id)
+      );
+      response.total = Math.max(
+        0,
+        response.total - (beforeCount - response.results.length)
+      );
     } else {
       if (!user) {
         throw AuthenticationError("Authentication error");

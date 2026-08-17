@@ -17,6 +17,8 @@ type Props = {
   hoverImage?: string | null;
   /** Whether the document is hidden from public share links */
   sharedHidden?: boolean;
+  /** The serialized Excalidraw scene for canvas pages */
+  canvasData?: Record<string, unknown> | null;
   /** The new text content */
   text?: string;
   /** Whether the editing session is complete */
@@ -55,6 +57,7 @@ export default async function documentUpdater(
     color,
     hoverImage,
     sharedHidden,
+    canvasData,
     text,
     editorVersion,
     templateId,
@@ -85,6 +88,9 @@ export default async function documentUpdater(
   }
   if (sharedHidden !== undefined) {
     document.sharedHidden = sharedHidden;
+  }
+  if (canvasData !== undefined) {
+    document.canvasData = canvasData;
   }
   if (editorVersion) {
     document.editorVersion = editorVersion;

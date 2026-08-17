@@ -9,7 +9,6 @@ import {
   TeamPreference,
   UserPreference,
 } from "@shared/types";
-import { Theme } from "~/stores/UiStore";
 import Button from "~/components/Button";
 import Heading from "~/components/Heading";
 import type { Option } from "~/components/InputSelect";
@@ -27,7 +26,7 @@ import SettingRow from "./components/SettingRow";
 
 function Preferences() {
   const { t } = useTranslation();
-  const { ui, dialogs } = useStores();
+  const { dialogs } = useStores();
   const user = useCurrentUser();
   const team = useCurrentTeam();
   const can = usePolicy(user.id);
@@ -43,16 +42,6 @@ function Preferences() {
           }) satisfies Option
       ),
     []
-  );
-
-  const themeOptions: Option[] = React.useMemo(
-    () =>
-      [
-        { type: "item", label: t("Light"), value: Theme.Light },
-        { type: "item", label: t("Dark"), value: Theme.Dark },
-        { type: "item", label: t("System"), value: Theme.System },
-      ] satisfies Option[],
-    [t]
   );
 
   const handleUseCursorPointerChange = React.useCallback(
@@ -141,14 +130,6 @@ function Preferences() {
     [t, user]
   );
 
-  const handleThemeChange = React.useCallback(
-    (theme) => {
-      ui.setTheme(theme as Theme);
-      toast.success(t("Preferences saved"));
-    },
-    [t, ui]
-  );
-
   const showDeleteAccount = () => {
     dialogs.openModal({
       title: t("Delete account"),
@@ -189,19 +170,6 @@ function Preferences() {
           value={user.language}
           onChange={handleLanguageChange}
           label={t("Language")}
-          labelHidden
-        />
-      </SettingRow>
-      <SettingRow
-        name="theme"
-        label={t("Appearance")}
-        description={t("Choose your preferred interface color scheme.")}
-      >
-        <InputSelect
-          options={themeOptions}
-          value={ui.theme}
-          onChange={handleThemeChange}
-          label={t("Appearance")}
           labelHidden
         />
       </SettingRow>

@@ -12,7 +12,6 @@ import {
   openFeedbackUrl,
   logout,
 } from "~/actions/definitions/navigation";
-import { changeTheme } from "~/actions/definitions/settings";
 import { ActionSeparator } from "~/actions";
 import { useMenuAction } from "~/hooks/useMenuAction";
 import { DropdownMenu } from "~/components/Menu/DropdownMenu";
@@ -33,7 +32,6 @@ const AccountMenu: React.FC = ({ children }: Props) => {
       openChangelog,
       openFeedbackUrl,
       openBugReportUrl,
-      changeTheme,
       navigateToProfileSettings,
       navigateToAccountPreferences,
       ActionSeparator,

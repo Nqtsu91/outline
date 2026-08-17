@@ -281,6 +281,9 @@ export const DocumentsUpdateSchema = BaseSchema.extend({
     /** Whether the doc (and its sub-documents) is hidden from public share links */
     sharedHidden: z.boolean().optional(),
 
+    /** The serialized Excalidraw scene for canvas pages */
+    canvasData: z.record(z.string(), z.unknown()).nullish(),
+
     /** Boolean to denote if the doc should occupy full width */
     fullWidth: z.boolean().optional(),
 
@@ -474,8 +477,8 @@ export const DocumentsCreateSchema = BaseSchema.extend({
     /** Boolean to denote if the document should occupy full width */
     fullWidth: z.boolean().optional(),
 
-    /** Document node type: regular document or group header */
-    type: z.enum(["document", "group"]).optional(),
+    /** Document node type: regular document, group header, or canvas whiteboard */
+    type: z.enum(["document", "group", "canvas"]).optional(),
   }),
 }).refine(
   (req) =>

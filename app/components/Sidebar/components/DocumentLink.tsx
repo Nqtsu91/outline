@@ -1,5 +1,6 @@
 import type { Location } from "history";
 import { observer } from "mobx-react";
+import { ShapesIcon } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { useHistory } from "react-router-dom";
@@ -178,8 +179,12 @@ const DocumentLinkInner = observer(function DocumentLinkInner({
 
   const iconElement = React.useMemo(
     () =>
-      icon ? <Icon value={icon} color={color} initial={initial} /> : undefined,
-    [icon, color, initial]
+      icon ? (
+        <Icon value={icon} color={color} initial={initial} />
+      ) : document?.type === "canvas" ? (
+        <ShapesIcon />
+      ) : undefined,
+    [icon, color, initial, document?.type]
   );
 
   const [{ isDragging }, drag] = useDragDocument(

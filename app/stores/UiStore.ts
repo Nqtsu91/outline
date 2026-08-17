@@ -449,15 +449,9 @@ class UiStore {
 
   @computed
   get resolvedTheme(): Theme | SystemTheme {
-    if (this.themeOverride) {
-      return this.themeOverride;
-    }
-
-    if (this.theme === "system") {
-      return this.systemTheme;
-    }
-
-    return this.theme;
+    // The light theme is disabled for this instance — the app always resolves
+    // to the dark theme regardless of the user or system preference.
+    return Theme.Dark;
   }
 
   @computed

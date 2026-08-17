@@ -311,10 +311,20 @@ class Document extends ArchivableModel<
   @Column
   template: boolean;
 
-  /** The type of document node: regular document or group header. */
+  /**
+   * The type of document node: a regular document, a group header, or an
+   * infinite-canvas whiteboard page.
+   */
   @Default("document")
   @Column(DataType.STRING(32))
-  type: "document" | "group";
+  type: "document" | "group" | "canvas";
+
+  /**
+   * For canvas pages, the serialized Excalidraw scene (elements, appState and
+   * files). Null for regular documents and groups.
+   */
+  @Column(DataType.JSONB)
+  canvasData: Record<string, unknown> | null;
 
   @Column
   insightsEnabled: boolean;

@@ -90,6 +90,11 @@ async function presentDocument(
     backlinkIds: options?.backlinkIds,
   };
 
+  // Canvas pages carry their Excalidraw scene instead of rich text content.
+  if (document.type === "canvas") {
+    res.canvasData = document.canvasData ?? null;
+  }
+
   if (!!document.views && document.views.length > 0) {
     res.lastViewedAt = document.views[0].updatedAt;
   }
