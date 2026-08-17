@@ -1,5 +1,6 @@
 import { Excalidraw, serializeAsJSON } from "@excalidraw/excalidraw";
-import "@excalidraw/excalidraw/index.css";
+// Note: @excalidraw/excalidraw 0.17.x injects its own styles via the JS bundle,
+// so no separate CSS import is required (that path only exists in 0.18+).
 import { debounce } from "es-toolkit/compat";
 import { observer } from "mobx-react";
 import * as React from "react";
