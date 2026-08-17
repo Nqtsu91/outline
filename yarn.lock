@@ -2620,6 +2620,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@excalidraw/excalidraw@npm:0.17.6":
+  version: 0.17.6
+  resolution: "@excalidraw/excalidraw@npm:0.17.6"
+  peerDependencies:
+    react: ^17.0.2 || ^18.2.0
+    react-dom: ^17.0.2 || ^18.2.0
+  checksum: 10c0/94242d5e3e3e274704fd0cbe4fb4aa552104d7ecc815e0a5bc55d045e974a1e0e0223e805baa2e7899ca2ff10125b95184acfb5f11e9f3fdb07f25ff9afb54e1
+  languageName: node
+  linkType: hard
+
 "@faker-js/faker@npm:^8.4.1":
   version: 8.4.1
   resolution: "@faker-js/faker@npm:8.4.1"
@@ -15631,6 +15641,7 @@ __metadata:
     "@dnd-kit/sortable": "npm:^7.0.2"
     "@dotenvx/dotenvx": "npm:^1.64.0"
     "@emoji-mart/data": "npm:^1.2.1"
+    "@excalidraw/excalidraw": "npm:0.17.6"
     "@faker-js/faker": "npm:^8.4.1"
     "@fast-csv/parse": "npm:^5.0.5"
     "@fortawesome/fontawesome-svg-core": "npm:^7.2.0"
