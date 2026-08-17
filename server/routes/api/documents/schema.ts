@@ -477,8 +477,8 @@ export const DocumentsCreateSchema = BaseSchema.extend({
     /** Boolean to denote if the document should occupy full width */
     fullWidth: z.boolean().optional(),
 
-    /** Document node type: regular document, group header, or canvas whiteboard */
-    type: z.enum(["document", "group", "canvas"]).optional(),
+    /** Document node type: regular document, group header, canvas, or tree */
+    type: z.enum(["document", "group", "canvas", "tree"]).optional(),
   }),
 }).refine(
   (req) =>

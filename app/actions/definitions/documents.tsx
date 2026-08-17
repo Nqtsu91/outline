@@ -245,6 +245,40 @@ export const createCanvas = createAction({
   },
 });
 
+export const createProjectTree = createAction({
+  name: ({ t }) => t("New project tree"),
+  analyticsName: "New project tree",
+  section: DocumentSection,
+  icon: <GraphIcon />,
+  keywords: "tree map roadmap project mindmap arbre carte graph nodes",
+  visible: ({ currentTeamId, activeCollectionId, stores }) => {
+    if (
+      activeCollectionId &&
+      !stores.policies.abilities(activeCollectionId).createDocument
+    ) {
+      return false;
+    }
+    return (
+      !!currentTeamId && stores.policies.abilities(currentTeamId).createDocument
+    );
+  },
+  perform: async ({ activeCollectionId, sidebarContext, stores }) => {
+    const document = await stores.documents.create(
+      {
+        collectionId: activeCollectionId ?? undefined,
+        title: "",
+        type: "tree",
+        data: SharedProsemirrorHelper.getEmptyDocument(),
+      },
+      { publish: true }
+    );
+    history.push({
+      pathname: document.path,
+      state: { sidebarContext },
+    });
+  },
+});
+
 /**
  * Finds the index of a document among its siblings in the collection tree.
  *
@@ -1623,6 +1657,7 @@ export const rootDocumentActions = [
   createDocument,
   createDraftDocument,
   createCanvas,
+  createProjectTree,
   createNewDocument,
   createNestedDocument,
   createTemplateFromDocument,

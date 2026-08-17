@@ -177,10 +177,10 @@ export default class Document extends ArchivableModel implements Searchable {
   @observable
   insightsEnabled: boolean;
 
-  /** Whether this node is a regular document, a group header, or a canvas. */
+  /** The kind of node: regular document, group header, canvas, or project tree. */
   @Field
   @observable
-  type: "document" | "group" | "canvas" = "document";
+  type: "document" | "group" | "canvas" | "tree" = "document";
 
   /**
    * For canvas pages, the serialized Excalidraw scene (elements, appState,

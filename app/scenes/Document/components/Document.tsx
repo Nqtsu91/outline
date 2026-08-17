@@ -32,6 +32,7 @@ import { emojiToUrl } from "~/utils/emoji";
 import { documentHistoryPath, documentEditPath } from "~/utils/routeHelpers";
 import { useDocumentSave } from "../hooks/useDocumentSave";
 import CanvasEditor from "./AsyncCanvasEditor";
+import TreeEditor from "./AsyncTreeEditor";
 import Container from "./Container";
 import Contents from "./Contents";
 import Editor from "./Editor";
@@ -371,6 +372,14 @@ function DocumentScene({
                   <>
                     <Notices document={document} readOnly={readOnly} />
                     <CanvasEditor
+                      document={document}
+                      readOnly={readOnly || !abilities.update}
+                    />
+                  </>
+                ) : document.type === "tree" ? (
+                  <>
+                    <Notices document={document} readOnly={readOnly} />
+                    <TreeEditor
                       document={document}
                       readOnly={readOnly || !abilities.update}
                     />

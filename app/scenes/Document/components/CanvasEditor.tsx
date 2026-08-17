@@ -1,7 +1,6 @@
 import { Excalidraw, serializeAsJSON } from "@excalidraw/excalidraw";
 // Note: @excalidraw/excalidraw 0.17.x injects its own styles via the JS bundle,
 // so no separate CSS import is required (that path only exists in 0.18+).
-import { debounce } from "es-toolkit/compat";
 import { observer } from "mobx-react";
 import * as React from "react";
 import styled from "styled-components";
@@ -15,6 +14,13 @@ type Props = {
   readOnly?: boolean;
 };
 
+// oxlint-disable no-explicit-any
+type ExcalidrawApi = {
+  updateScene: (scene: any) => void;
+  addFiles: (files: any[]) => void;
+  getSceneElements: () => readonly any[];
+};
+
 /**
  * Renders an infinite whiteboard (Excalidraw) for documents of type "canvas".
  * The scene is loaded from and autosaved to the document's `canvasData` field.
@@ -23,74 +29,98 @@ type Props = {
  */
 function CanvasEditor({ document, readOnly }: Props) {
   const { documents } = useStores();
+  const [api, setApi] = React.useState<ExcalidrawApi | null>(null);
 
-  // Compute the initial scene once so autosaves don't reset the canvas.
+  // Compute the initial scene once so autosaves don't reset the canvas. This
+  // covers the case where the document is already fully loaded on mount.
   const initialData = React.useMemo(() => {
-    const data = document.canvasData as
-      | {
-          elements?: unknown;
-          appState?: Record<string, unknown>;
-          files?: unknown;
-        }
-      | null
-      | undefined;
-
+    const data = document.canvasData as any;
     if (!data) {
       return null;
     }
-
     return {
-      // oxlint-disable-next-line no-explicit-any
-      elements: (data.elements as any) ?? [],
-      appState: {
-        ...(data.appState ?? {}),
-        // never restore transient collaborator presence
-        collaborators: undefined,
-      },
-      // oxlint-disable-next-line no-explicit-any
-      files: (data.files as any) ?? undefined,
+      elements: data.elements ?? [],
+      appState: { ...(data.appState ?? {}), collaborators: undefined },
+      files: data.files ?? undefined,
+      scrollToContent: true,
     };
     // Only computed on mount — subsequent saves must not remount the scene.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const persist = React.useMemo(
-    () =>
-      debounce(
-        // oxlint-disable-next-line no-explicit-any
-        (elements: any, appState: any, files: any) => {
-          const json = serializeAsJSON(
-            elements,
-            appState,
-            files ?? {},
-            "database"
-          );
-          void documents.update({
-            id: document.id,
-            canvasData: JSON.parse(json),
-          });
-        },
-        1500
-      ),
-    [documents, document.id]
-  );
+  // If the document's canvasData arrives after the editor mounts (e.g. it was
+  // still loading), push the scene into Excalidraw once.
+  const loadedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!api || loadedRef.current) {
+      return;
+    }
+    const data = document.canvasData as any;
+    if (data && Array.isArray(data.elements) && data.elements.length > 0) {
+      // Don't clobber a scene the user has already started drawing.
+      if (api.getSceneElements().length === 0) {
+        api.updateScene({
+          elements: data.elements,
+          appState: { ...(data.appState ?? {}), collaborators: undefined },
+        });
+        if (data.files) {
+          api.addFiles(Object.values(data.files));
+        }
+      }
+      loadedRef.current = true;
+    }
+  }, [api, document.canvasData]);
 
-  React.useEffect(() => () => persist.flush(), [persist]);
+  // Debounced autosave with a guaranteed flush when the editor unmounts so
+  // navigating away never loses the last edits.
+  const pendingRef = React.useRef<{
+    elements: any;
+    appState: any;
+    files: any;
+  } | null>(null);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  const flush = React.useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+    const pending = pendingRef.current;
+    if (!pending) {
+      return;
+    }
+    pendingRef.current = null;
+    const json = serializeAsJSON(
+      pending.elements,
+      pending.appState,
+      pending.files ?? {},
+      "database"
+    );
+    void documents.update({
+      id: document.id,
+      canvasData: JSON.parse(json),
+    });
+  }, [documents, document.id]);
 
   const handleChange = React.useCallback(
-    // oxlint-disable-next-line no-explicit-any
     (elements: any, appState: any, files: any) => {
       if (readOnly) {
         return;
       }
-      persist(elements, appState, files);
+      pendingRef.current = { elements, appState, files };
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+      timerRef.current = setTimeout(flush, 1000);
     },
-    [readOnly, persist]
+    [readOnly, flush]
   );
+
+  React.useEffect(() => () => flush(), [flush]);
 
   return (
     <Container>
       <Excalidraw
+        excalidrawAPI={setApi as any}
         initialData={initialData ?? undefined}
         onChange={handleChange}
         viewModeEnabled={readOnly}

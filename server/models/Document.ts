@@ -312,16 +312,16 @@ class Document extends ArchivableModel<
   template: boolean;
 
   /**
-   * The type of document node: a regular document, a group header, or an
-   * infinite-canvas whiteboard page.
+   * The type of document node: a regular document, a group header, an
+   * infinite-canvas whiteboard page, or a project tree.
    */
   @Default("document")
   @Column(DataType.STRING(32))
-  type: "document" | "group" | "canvas";
+  type: "document" | "group" | "canvas" | "tree";
 
   /**
-   * For canvas pages, the serialized Excalidraw scene (elements, appState and
-   * files). Null for regular documents and groups.
+   * Structured page data stored as JSON: for "canvas" pages the serialized
+   * Excalidraw scene, for "tree" pages the project tree. Null otherwise.
    */
   @Column(DataType.JSONB)
   canvasData: Record<string, unknown> | null;

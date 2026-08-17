@@ -90,8 +90,8 @@ async function presentDocument(
     backlinkIds: options?.backlinkIds,
   };
 
-  // Canvas pages carry their Excalidraw scene instead of rich text content.
-  if (document.type === "canvas") {
+  // Canvas and tree pages carry structured JSON data instead of rich text.
+  if (document.type === "canvas" || document.type === "tree") {
     res.canvasData = document.canvasData ?? null;
   }
 
