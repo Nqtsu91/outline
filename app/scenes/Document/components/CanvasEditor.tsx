@@ -1,10 +1,13 @@
-import { Excalidraw, serializeAsJSON } from "@excalidraw/excalidraw";
+import { Excalidraw } from "@excalidraw/excalidraw";
 // Note: @excalidraw/excalidraw 0.17.x injects its own styles via the JS bundle,
 // so no separate CSS import is required (that path only exists in 0.18+).
 import { observer } from "mobx-react";
 import * as React from "react";
+import { toast } from "sonner";
 import styled from "styled-components";
+import type { JSONObject } from "@shared/types";
 import type Document from "~/models/Document";
+import Logger from "~/utils/Logger";
 import useStores from "~/hooks/useStores";
 
 type Props = {
@@ -89,16 +92,25 @@ function CanvasEditor({ document, readOnly }: Props) {
       return;
     }
     pendingRef.current = null;
-    const json = serializeAsJSON(
-      pending.elements,
-      pending.appState,
-      pending.files ?? {},
-      "database"
-    );
-    void documents.update({
-      id: document.id,
-      canvasData: JSON.parse(json),
-    });
+
+    // Store the raw elements and files directly — they are plain,
+    // JSON-serializable data and fully define the scene. We deliberately drop
+    // the transient appState (selection, cursor, collaborators) which can
+    // contain non-serializable values.
+    const canvasData = {
+      elements: pending.elements,
+      files: pending.files ?? {},
+      appState: {
+        viewBackgroundColor: pending.appState?.viewBackgroundColor,
+      },
+    } as unknown as JSONObject;
+
+    void documents
+      .update({ id: document.id, canvasData })
+      .catch((err: Error) => {
+        Logger.error("Failed to save canvas", err);
+        toast.error(err.message);
+      });
   }, [documents, document.id]);
 
   const handleChange = React.useCallback(

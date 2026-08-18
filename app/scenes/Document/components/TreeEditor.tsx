@@ -9,14 +9,14 @@ import useStores from "~/hooks/useStores";
 /**
  * Project tree editor (MVP).
  *
- * An infinite, dark canvas that renders a self-aligning tree of rectangular
- * nodes connected by elbow arrows. Each node has text, an optional emoji
- * (inherited by children), and a status that colors the rectangle. Nodes can be
- * added, collapsed, and deleted; the whole tree supports undo/redo and is
- * autosaved to the document's `canvasData` field.
+ * An infinite, dark canvas that renders one or more self-aligning trees of
+ * rectangular nodes connected by elbow arrows. Each node has text, an optional
+ * emoji (inherited by children), a status that colors the rectangle, and an
+ * optional custom color override. Nodes can be added, collapsed, recolored and
+ * deleted; the canvas supports pan/zoom, fit-to-view, undo/redo and autosave.
  *
- * Phase 2 (not yet implemented): drag-to-reorder with a greyed preview and
- * insertion onto connector arrows.
+ * Phase 2 (not yet implemented): drag-to-reorder a branch with a greyed preview
+ * and insertion onto connector arrows.
  */
 
 type TreeStatus = "not_started" | "in_progress" | "to_validate" | "done";
@@ -26,12 +26,14 @@ type TreeNode = {
   text: string;
   emoji?: string;
   status: TreeStatus;
+  /** Custom color override; when set it takes precedence over the status color. */
+  color?: string;
   collapsed?: boolean;
   children: string[];
 };
 
 type TreeData = {
-  rootId: string;
+  rootIds: string[];
   nodes: Record<string, TreeNode>;
   bgColor?: string;
 };
@@ -46,16 +48,14 @@ const NODE_H = 56;
 const H_GAP = 72;
 const V_GAP = 18;
 const PADDING = 60;
+const TREE_GAP = 2; // blank leaf-rows inserted between separate trees
 const DEFAULT_BG = "#1b211f";
 
-const STATUSES: Record<
-  TreeStatus,
-  { labelKey: string; color: string; text: string }
-> = {
-  not_started: { labelKey: "Not started", color: "#6b7280", text: "#ffffff" },
-  in_progress: { labelKey: "In progress", color: "#a85a38", text: "#ffffff" },
-  to_validate: { labelKey: "To validate", color: "#8f9147", text: "#ffffff" },
-  done: { labelKey: "Done", color: "#2f7d4f", text: "#ffffff" },
+const STATUSES: Record<TreeStatus, { labelKey: string; color: string }> = {
+  not_started: { labelKey: "Not started", color: "#6b7280" },
+  in_progress: { labelKey: "In progress", color: "#a85a38" },
+  to_validate: { labelKey: "To validate", color: "#8f9147" },
+  done: { labelKey: "Done", color: "#2f7d4f" },
 };
 const STATUS_ORDER: TreeStatus[] = [
   "not_started",
@@ -64,42 +64,49 @@ const STATUS_ORDER: TreeStatus[] = [
   "done",
 ];
 
+const nodeColor = (node: TreeNode) => node.color || STATUSES[node.status].color;
+
 function uid() {
-  // Runtime-only id; collisions are astronomically unlikely for a single tree.
   return (
     Math.random().toString(36).slice(2, 10) +
     Math.random().toString(36).slice(2, 6)
   );
 }
 
-function defaultTree(): TreeData {
-  const id = uid();
+function newNode(emoji?: string): TreeNode {
   return {
-    rootId: id,
-    nodes: {
-      [id]: {
-        id,
-        text: "",
-        emoji: "",
-        status: "not_started",
-        children: [],
-        collapsed: false,
-      },
-    },
+    id: uid(),
+    text: "",
+    emoji: emoji ?? "",
+    status: "not_started",
+    children: [],
+    collapsed: false,
   };
 }
 
+function defaultTree(): TreeData {
+  const node = newNode();
+  return { rootIds: [node.id], nodes: { [node.id]: node } };
+}
+
+/** Accepts both the current multi-root shape and the earlier single-root shape. */
 function normalize(data: unknown): TreeData | null {
-  const d = data as TreeData | null;
-  if (d && d.rootId && d.nodes && d.nodes[d.rootId]) {
-    return d;
+  const d = data as (TreeData & { rootId?: string }) | null;
+  if (!d || !d.nodes) {
+    return null;
+  }
+  if (Array.isArray(d.rootIds) && d.rootIds.length) {
+    return { rootIds: d.rootIds, nodes: d.nodes, bgColor: d.bgColor };
+  }
+  if (d.rootId && d.nodes[d.rootId]) {
+    return { rootIds: [d.rootId], nodes: d.nodes, bgColor: d.bgColor };
   }
   return null;
 }
 
 type Positions = Record<string, { x: number; y: number }>;
 
-/** Computes a tidy left-to-right layout where each node's children share a column. */
+/** Tidy left-to-right layout; children share a column, trees stack vertically. */
 function computeLayout(tree: TreeData): {
   positions: Positions;
   width: number;
@@ -116,7 +123,9 @@ function computeLayout(tree: TreeData): {
     }
     maxDepth = Math.max(maxDepth, depth);
     const x = depth * (NODE_W + H_GAP);
-    const kids = node.collapsed ? [] : node.children.filter((c) => tree.nodes[c]);
+    const kids = node.collapsed
+      ? []
+      : node.children.filter((c) => tree.nodes[c]);
 
     if (kids.length === 0) {
       const y = leaf * (NODE_H + V_GAP);
@@ -124,14 +133,18 @@ function computeLayout(tree: TreeData): {
       positions[id] = { x, y };
       return y;
     }
-
     const ys = kids.map((cid) => walk(cid, depth + 1));
     const y = (ys[0] + ys[ys.length - 1]) / 2;
     positions[id] = { x, y };
     return y;
   };
 
-  walk(tree.rootId, 0);
+  tree.rootIds.forEach((rootId) => {
+    if (tree.nodes[rootId]) {
+      walk(rootId, 0);
+      leaf += TREE_GAP;
+    }
+  });
 
   const width = (maxDepth + 1) * (NODE_W + H_GAP);
   const height = Math.max(1, leaf) * (NODE_H + V_GAP);
@@ -151,7 +164,6 @@ function TreeEditor({ document, readOnly }: Props) {
     null
   );
 
-  // Adopt server data if it arrives after mount and the user hasn't edited yet.
   const dirtyRef = React.useRef(false);
   const loadedRef = React.useRef(!!normalize(document.canvasData));
   React.useEffect(() => {
@@ -169,13 +181,13 @@ function TreeEditor({ document, readOnly }: Props) {
   const history = React.useRef<TreeData[]>([tree]);
   const historyIndex = React.useRef(0);
 
-  const persist = React.useRef<ReturnType<typeof setTimeout>>();
+  const persistTimer = React.useRef<ReturnType<typeof setTimeout>>();
   const scheduleSave = React.useCallback(
     (next: TreeData) => {
-      if (persist.current) {
-        clearTimeout(persist.current);
+      if (persistTimer.current) {
+        clearTimeout(persistTimer.current);
       }
-      persist.current = setTimeout(() => {
+      persistTimer.current = setTimeout(() => {
         void documents.update({
           id: document.id,
           canvasData: next as unknown as JSONObject,
@@ -188,7 +200,6 @@ function TreeEditor({ document, readOnly }: Props) {
   const commit = React.useCallback(
     (next: TreeData) => {
       dirtyRef.current = true;
-      // Truncate any redo branch, push the new state.
       history.current = history.current.slice(0, historyIndex.current + 1);
       history.current.push(next);
       historyIndex.current = history.current.length - 1;
@@ -234,32 +245,35 @@ function TreeEditor({ document, readOnly }: Props) {
       if (!parent) {
         return;
       }
-      const id = uid();
-      const child: TreeNode = {
-        id,
-        text: "",
-        emoji: parent.emoji, // children inherit the parent's icon by default
-        status: "not_started",
-        children: [],
-        collapsed: false,
-      };
+      const child = newNode(parent.emoji);
       commit({
         ...tree,
         nodes: {
           ...tree.nodes,
-          [id]: child,
+          [child.id]: child,
           [parentId]: {
             ...parent,
             collapsed: false,
-            children: [...parent.children, id],
+            children: [...parent.children, child.id],
           },
         },
       });
-      setSelectedId(id);
-      setEditingId(id);
+      setSelectedId(child.id);
+      setEditingId(child.id);
     },
     [tree, commit]
   );
+
+  const addRoot = React.useCallback(() => {
+    const node = newNode();
+    commit({
+      ...tree,
+      rootIds: [...tree.rootIds, node.id],
+      nodes: { ...tree.nodes, [node.id]: node },
+    });
+    setSelectedId(node.id);
+    setEditingId(node.id);
+  }, [tree, commit]);
 
   const collectSubtree = React.useCallback(
     (id: string, acc: string[]) => {
@@ -272,13 +286,9 @@ function TreeEditor({ document, readOnly }: Props) {
 
   const deleteNode = React.useCallback(
     (id: string) => {
-      if (id === tree.rootId) {
-        return;
-      }
       const ids = collectSubtree(id, []);
       const nodes = { ...tree.nodes };
       ids.forEach((nid) => delete nodes[nid]);
-      // detach from parent
       Object.keys(nodes).forEach((nid) => {
         if (nodes[nid].children.includes(id)) {
           nodes[nid] = {
@@ -287,7 +297,11 @@ function TreeEditor({ document, readOnly }: Props) {
           };
         }
       });
-      commit({ ...tree, nodes });
+      commit({
+        ...tree,
+        rootIds: tree.rootIds.filter((r) => r !== id),
+        nodes,
+      });
       setSelectedId(null);
       setEditingId(null);
       setConfirmDeleteId(null);
@@ -312,11 +326,9 @@ function TreeEditor({ document, readOnly }: Props) {
 
   // ---- pan / zoom ----------------------------------------------------------
 
+  const containerRef = React.useRef<HTMLDivElement>(null);
   const [view, setView] = React.useState({ x: 40, y: 40, scale: 1 });
 
-  // Panning: start on a background press and track via window listeners so the
-  // drag keeps working even when the pointer leaves the viewport. Nodes stop
-  // propagation on their own press, so this only fires on empty canvas.
   const onBackgroundPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) {
       return;
@@ -341,7 +353,6 @@ function TreeEditor({ document, readOnly }: Props) {
 
   const onWheel = (e: React.WheelEvent) => {
     if (!e.ctrlKey && !e.metaKey) {
-      // plain wheel pans vertically, shift+wheel horizontally
       setView((v) => ({
         ...v,
         x: v.x - (e.shiftKey ? e.deltaY : e.deltaX),
@@ -351,15 +362,42 @@ function TreeEditor({ document, readOnly }: Props) {
     }
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    setView((v) => {
-      const scale = Math.min(2.5, Math.max(0.2, v.scale * factor));
-      return { ...v, scale };
-    });
+    setView((v) => ({
+      ...v,
+      scale: Math.min(2.5, Math.max(0.15, v.scale * factor)),
+    }));
   };
+
+  const zoomBy = (factor: number) =>
+    setView((v) => ({
+      ...v,
+      scale: Math.min(2.5, Math.max(0.15, v.scale * factor)),
+    }));
+
+  const { positions, width, height } = React.useMemo(
+    () => computeLayout(tree),
+    [tree]
+  );
+  const contentW = width + PADDING * 2;
+  const contentH = height + PADDING * 2;
+
+  const fitToView = React.useCallback(() => {
+    const el = containerRef.current;
+    if (!el) {
+      return;
+    }
+    const vw = el.clientWidth;
+    const vh = el.clientHeight;
+    const scale = Math.min(vw / contentW, vh / contentH, 1) * 0.95;
+    setView({
+      x: (vw - contentW * scale) / 2,
+      y: (vh - contentH * scale) / 2,
+      scale: Math.max(0.15, scale),
+    });
+  }, [contentW, contentH]);
 
   // ---- keyboard: undo / redo ----------------------------------------------
 
-  const containerRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     const el = containerRef.current;
     if (!el) {
@@ -385,14 +423,7 @@ function TreeEditor({ document, readOnly }: Props) {
 
   // ---- render --------------------------------------------------------------
 
-  const { positions, width, height } = React.useMemo(
-    () => computeLayout(tree),
-    [tree]
-  );
   const bg = tree.bgColor || DEFAULT_BG;
-  const contentW = width + PADDING * 2;
-  const contentH = height + PADDING * 2;
-
   const visibleIds = Object.keys(positions);
   const edges: Array<{ from: string; to: string }> = [];
   visibleIds.forEach((id) => {
@@ -423,6 +454,19 @@ function TreeEditor({ document, readOnly }: Props) {
         }}
       >
         <Edges width={contentW} height={contentH}>
+          <defs>
+            <marker
+              id="tree-arrow"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,0.5)" />
+            </marker>
+          </defs>
           {edges.map(({ from, to }) => {
             const a = positions[from];
             const b = positions[to];
@@ -442,25 +486,11 @@ function TreeEditor({ document, readOnly }: Props) {
               />
             );
           })}
-          <defs>
-            <marker
-              id="tree-arrow"
-              viewBox="0 0 10 10"
-              refX="8"
-              refY="5"
-              markerWidth="7"
-              markerHeight="7"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,0.5)" />
-            </marker>
-          </defs>
         </Edges>
 
         {visibleIds.map((id) => {
           const node = tree.nodes[id];
           const p = positions[id];
-          const status = STATUSES[node.status];
           const isSelected = selectedId === id;
           const isEditing = editingId === id;
           const hasChildren = node.children.length > 0;
@@ -472,8 +502,7 @@ function TreeEditor({ document, readOnly }: Props) {
                 top: PADDING + p.y,
                 width: NODE_W,
                 height: NODE_H,
-                background: status.color,
-                color: status.text,
+                background: nodeColor(node),
                 outline: isSelected ? "2px solid #ffffff" : "none",
               }}
               onPointerDown={(e) => {
@@ -523,19 +552,24 @@ function TreeEditor({ document, readOnly }: Props) {
                         style={{
                           background: STATUSES[s].color,
                           outline:
-                            node.status === s
+                            !node.color && node.status === s
                               ? "2px solid #fff"
                               : "1px solid rgba(255,255,255,0.3)",
                         }}
-                        onClick={() => updateNode(id, { status: s })}
+                        onClick={() =>
+                          updateNode(id, { status: s, color: undefined })
+                        }
                       />
                     ))}
                   </StatusRow>
+                  <ColorInput
+                    type="color"
+                    title={t("Custom color")}
+                    value={nodeColor(node)}
+                    onChange={(e) => updateNode(id, { color: e.target.value })}
+                  />
                   <Btn title={t("Add child")} onClick={() => addChild(id)}>
                     +
-                  </Btn>
-                  <Btn title={t("Add child")} onClick={() => addChild(id)}>
-                    →
                   </Btn>
                   {hasChildren && (
                     <Btn
@@ -547,21 +581,44 @@ function TreeEditor({ document, readOnly }: Props) {
                       {node.collapsed ? "▸" : "–"}
                     </Btn>
                   )}
-                  {id !== tree.rootId && (
-                    <Btn
-                      title={t("Delete")}
-                      $danger
-                      onClick={() => requestDelete(id)}
-                    >
-                      🗑
-                    </Btn>
-                  )}
+                  <Btn
+                    title={t("Delete")}
+                    $danger
+                    onClick={() => requestDelete(id)}
+                  >
+                    🗑
+                  </Btn>
                 </Toolbar>
               )}
             </NodeBox>
           );
         })}
       </World>
+
+      {!readOnly && (
+        <Controls onPointerDown={(e) => e.stopPropagation()}>
+          <Btn title={t("New tree")} onClick={addRoot}>
+            + {t("Tree")}
+          </Btn>
+          <Divider />
+          <Btn title={t("Zoom in")} onClick={() => zoomBy(1.2)}>
+            +
+          </Btn>
+          <Btn title={t("Zoom out")} onClick={() => zoomBy(1 / 1.2)}>
+            −
+          </Btn>
+          <Btn title={t("Fit to view")} onClick={fitToView}>
+            ⤢
+          </Btn>
+          <Divider />
+          <ColorInput
+            type="color"
+            title={t("Background color")}
+            value={bg}
+            onChange={(e) => commit({ ...tree, bgColor: e.target.value })}
+          />
+        </Controls>
+      )}
 
       {confirmDeleteId && (
         <ConfirmOverlay onPointerDown={(e) => e.stopPropagation()}>
@@ -624,6 +681,7 @@ const NodeBox = styled.div`
   gap: 8px;
   padding: 0 12px;
   cursor: pointer;
+  color: #ffffff;
   font-weight: 600;
 `;
 
@@ -687,6 +745,16 @@ const EmojiEdit = styled.input`
   padding: 2px;
 `;
 
+const ColorInput = styled.input`
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+`;
+
 const Btn = styled.button<{ $danger?: boolean }>`
   min-width: 24px;
   height: 24px;
@@ -704,6 +772,27 @@ const Btn = styled.button<{ $danger?: boolean }>`
     background: ${(p) =>
       p.$danger ? "rgba(200,60,60,0.5)" : "rgba(255,255,255,0.2)"};
   }
+`;
+
+const Controls = styled.div`
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #2b2f2d;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  z-index: 5;
+`;
+
+const Divider = styled.span`
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.15);
 `;
 
 const ConfirmOverlay = styled.div`
