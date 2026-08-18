@@ -1,4 +1,4 @@
-import { Excalidraw } from "@excalidraw/excalidraw";
+import { Excalidraw, restoreElements } from "@excalidraw/excalidraw";
 // Note: @excalidraw/excalidraw 0.17.x injects its own styles via the JS bundle,
 // so no separate CSS import is required (that path only exists in 0.18+).
 import { observer } from "mobx-react";
@@ -22,7 +22,21 @@ type ExcalidrawApi = {
   updateScene: (scene: any) => void;
   addFiles: (files: any[]) => void;
   getSceneElements: () => readonly any[];
+  scrollToContent: (target?: any, opts?: any) => void;
 };
+
+type SceneData = { elements: any[]; files?: any } | null;
+
+function toInitialData(data: any): SceneData {
+  if (!data || !Array.isArray(data.elements)) {
+    return null;
+  }
+  // Normalize through Excalidraw's restore helper. This is required for
+  // freehand ("freedraw") strokes to render — injecting raw elements directly
+  // leaves their cached path unregenerated so they appear invisible.
+  const elements = restoreElements(data.elements, null) as any[];
+  return { elements, files: data.files ?? undefined };
+}
 
 /**
  * Renders an infinite whiteboard (Excalidraw) for documents of type "canvas".
@@ -34,53 +48,54 @@ function CanvasEditor({ document, readOnly }: Props) {
   const { documents } = useStores();
   const [api, setApi] = React.useState<ExcalidrawApi | null>(null);
 
-  // Compute the initial scene once so autosaves don't reset the canvas. This
-  // covers the case where the document is already fully loaded on mount.
-  const initialData = React.useMemo(() => {
-    const data = document.canvasData as any;
-    if (!data) {
-      return null;
-    }
-    return {
-      elements: data.elements ?? [],
-      appState: { ...(data.appState ?? {}), collaborators: undefined },
-      files: data.files ?? undefined,
-      scrollToContent: true,
-    };
-    // Only computed on mount — subsequent saves must not remount the scene.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Resolve the initial scene before mounting Excalidraw, so a saved drawing is
+  // never missed because `canvasData` arrived a tick after mount. `undefined`
+  // means "still resolving"; `null` means "fresh, empty canvas".
+  const [initial, setInitial] = React.useState<SceneData | undefined>(() =>
+    document.canvasData ? toInitialData(document.canvasData) : undefined
+  );
 
-  // If the document's canvasData arrives after the editor mounts (e.g. it was
-  // still loading), push the scene into Excalidraw once.
-  const loadedRef = React.useRef(false);
   React.useEffect(() => {
-    if (!api || loadedRef.current) {
+    if (initial !== undefined) {
       return;
     }
-    const data = document.canvasData as any;
-    if (data && Array.isArray(data.elements) && data.elements.length > 0) {
-      // Don't clobber a scene the user has already started drawing.
-      if (api.getSceneElements().length === 0) {
-        api.updateScene({
-          elements: data.elements,
-          appState: { ...(data.appState ?? {}), collaborators: undefined },
-        });
-        if (data.files) {
-          api.addFiles(Object.values(data.files));
-        }
-      }
-      loadedRef.current = true;
+    const resolved = toInitialData(document.canvasData);
+    if (resolved) {
+      setInitial(resolved);
     }
-  }, [api, document.canvasData]);
+  }, [document.canvasData, initial]);
 
-  // Debounced autosave with a guaranteed flush when the editor unmounts so
-  // navigating away never loses the last edits.
-  const pendingRef = React.useRef<{
-    elements: any;
-    appState: any;
-    files: any;
-  } | null>(null);
+  React.useEffect(() => {
+    if (initial !== undefined) {
+      return;
+    }
+    // Fall back to an empty canvas if no data has resolved shortly after mount.
+    const timer = setTimeout(
+      () => setInitial((cur) => (cur === undefined ? null : cur)),
+      700
+    );
+    return () => clearTimeout(timer);
+  }, [initial]);
+
+  // Recenter on the saved content once the editor API is ready.
+  const centeredRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!api || centeredRef.current) {
+      return;
+    }
+    const elements = api.getSceneElements();
+    if (elements.length > 0) {
+      centeredRef.current = true;
+      try {
+        api.scrollToContent(elements, { fitToContent: true });
+      } catch (_err) {
+        // scrollToContent signature differs slightly across versions; ignore.
+      }
+    }
+  }, [api, initial]);
+
+  // Debounced autosave with a guaranteed flush on unmount.
+  const pendingRef = React.useRef<{ elements: any; files: any } | null>(null);
   const timerRef = React.useRef<ReturnType<typeof setTimeout>>();
 
   const flush = React.useCallback(() => {
@@ -92,19 +107,10 @@ function CanvasEditor({ document, readOnly }: Props) {
       return;
     }
     pendingRef.current = null;
-
-    // Store the raw elements and files directly — they are plain,
-    // JSON-serializable data and fully define the scene. We deliberately drop
-    // the transient appState (selection, cursor, collaborators) which can
-    // contain non-serializable values.
     const canvasData = {
       elements: pending.elements,
       files: pending.files ?? {},
-      appState: {
-        viewBackgroundColor: pending.appState?.viewBackgroundColor,
-      },
     } as unknown as JSONObject;
-
     void documents
       .update({ id: document.id, canvasData })
       .catch((err: Error) => {
@@ -114,11 +120,11 @@ function CanvasEditor({ document, readOnly }: Props) {
   }, [documents, document.id]);
 
   const handleChange = React.useCallback(
-    (elements: any, appState: any, files: any) => {
+    (elements: any, _appState: any, files: any) => {
       if (readOnly) {
         return;
       }
-      pendingRef.current = { elements, appState, files };
+      pendingRef.current = { elements, files };
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
@@ -129,11 +135,17 @@ function CanvasEditor({ document, readOnly }: Props) {
 
   React.useEffect(() => () => flush(), [flush]);
 
+  if (initial === undefined) {
+    return <Container />;
+  }
+
   return (
     <Container>
       <Excalidraw
         excalidrawAPI={setApi as any}
-        initialData={initialData ?? undefined}
+        initialData={
+          initial ? { ...initial, scrollToContent: true } : undefined
+        }
         onChange={handleChange}
         viewModeEnabled={readOnly}
         theme="dark"

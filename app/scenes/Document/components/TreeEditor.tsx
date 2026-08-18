@@ -10,13 +10,13 @@ import useStores from "~/hooks/useStores";
  * Project tree editor (MVP).
  *
  * An infinite, dark canvas that renders one or more self-aligning trees of
- * rectangular nodes connected by elbow arrows. Each node has text, an optional
- * emoji (inherited by children), a status that colors the rectangle, and an
- * optional custom color override. Nodes can be added, collapsed, recolored and
- * deleted; the canvas supports pan/zoom, fit-to-view, undo/redo and autosave.
+ * rectangular nodes connected by elbow arrows. Each node has text, a status
+ * that colors the rectangle, and an optional custom color. Whole trees can be
+ * moved freely (Move tool). Supports pan/zoom, fit-to-view, undo/redo and
+ * autosave.
  *
- * Phase 2 (not yet implemented): drag-to-reorder a branch with a greyed preview
- * and insertion onto connector arrows.
+ * Phase 2 (not yet implemented): drag a single branch to re-parent it with a
+ * greyed preview and insertion onto connector arrows.
  */
 
 type TreeStatus = "not_started" | "in_progress" | "to_validate" | "done";
@@ -26,10 +26,12 @@ type TreeNode = {
   text: string;
   emoji?: string;
   status: TreeStatus;
-  /** Custom color override; when set it takes precedence over the status color. */
+  /** Custom color override; takes precedence over the status color. */
   color?: string;
   collapsed?: boolean;
   children: string[];
+  /** Manual position offset, only meaningful on root nodes (Move tool). */
+  offset?: { x: number; y: number };
 };
 
 type TreeData = {
@@ -47,8 +49,8 @@ const NODE_W = 190;
 const NODE_H = 56;
 const H_GAP = 72;
 const V_GAP = 18;
-const PADDING = 60;
-const TREE_GAP = 2; // blank leaf-rows inserted between separate trees
+const PADDING = 80;
+const TREE_GAP = 2;
 const DEFAULT_BG = "#1b211f";
 
 const STATUSES: Record<TreeStatus, { labelKey: string; color: string }> = {
@@ -73,11 +75,10 @@ function uid() {
   );
 }
 
-function newNode(emoji?: string): TreeNode {
+function newNode(): TreeNode {
   return {
     id: uid(),
     text: "",
-    emoji: emoji ?? "",
     status: "not_started",
     children: [],
     collapsed: false,
@@ -89,7 +90,6 @@ function defaultTree(): TreeData {
   return { rootIds: [node.id], nodes: { [node.id]: node } };
 }
 
-/** Accepts both the current multi-root shape and the earlier single-root shape. */
 function normalize(data: unknown): TreeData | null {
   const d = data as (TreeData & { rootId?: string }) | null;
   if (!d || !d.nodes) {
@@ -106,49 +106,67 @@ function normalize(data: unknown): TreeData | null {
 
 type Positions = Record<string, { x: number; y: number }>;
 
-/** Tidy left-to-right layout; children share a column, trees stack vertically. */
+/** Tidy left-to-right layout; children share a column, trees stack (or are moved). */
 function computeLayout(tree: TreeData): {
   positions: Positions;
   width: number;
   height: number;
 } {
-  const positions: Positions = {};
+  const raw: Positions = {};
   let leaf = 0;
-  let maxDepth = 0;
 
-  const walk = (id: string, depth: number): number => {
+  const walk = (id: string, depth: number, ox: number, oy: number): number => {
     const node = tree.nodes[id];
     if (!node) {
       return 0;
     }
-    maxDepth = Math.max(maxDepth, depth);
-    const x = depth * (NODE_W + H_GAP);
+    const x = ox + depth * (NODE_W + H_GAP);
     const kids = node.collapsed
       ? []
       : node.children.filter((c) => tree.nodes[c]);
 
     if (kids.length === 0) {
-      const y = leaf * (NODE_H + V_GAP);
+      const y = oy + leaf * (NODE_H + V_GAP);
       leaf++;
-      positions[id] = { x, y };
+      raw[id] = { x, y };
       return y;
     }
-    const ys = kids.map((cid) => walk(cid, depth + 1));
+    const ys = kids.map((cid) => walk(cid, depth + 1, ox, oy));
     const y = (ys[0] + ys[ys.length - 1]) / 2;
-    positions[id] = { x, y };
+    raw[id] = { x, y };
     return y;
   };
 
   tree.rootIds.forEach((rootId) => {
-    if (tree.nodes[rootId]) {
-      walk(rootId, 0);
-      leaf += TREE_GAP;
+    const root = tree.nodes[rootId];
+    if (!root) {
+      return;
     }
+    const off = root.offset ?? { x: 0, y: 0 };
+    walk(rootId, 0, off.x, off.y);
+    leaf += TREE_GAP;
   });
 
-  const width = (maxDepth + 1) * (NODE_W + H_GAP);
-  const height = Math.max(1, leaf) * (NODE_H + V_GAP);
-  return { positions, width, height };
+  const xs = Object.values(raw).map((p) => p.x);
+  const ys = Object.values(raw).map((p) => p.y);
+  const minX = xs.length ? Math.min(...xs) : 0;
+  const minY = ys.length ? Math.min(...ys) : 0;
+  const maxX = xs.length ? Math.max(...xs) : 0;
+  const maxY = ys.length ? Math.max(...ys) : 0;
+
+  const positions: Positions = {};
+  Object.keys(raw).forEach((id) => {
+    positions[id] = {
+      x: raw[id].x - minX + PADDING,
+      y: raw[id].y - minY + PADDING,
+    };
+  });
+
+  return {
+    positions,
+    width: maxX - minX + NODE_W + PADDING * 2,
+    height: maxY - minY + NODE_H + PADDING * 2,
+  };
 }
 
 function TreeEditor({ document, readOnly }: Props) {
@@ -163,6 +181,7 @@ function TreeEditor({ document, readOnly }: Props) {
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(
     null
   );
+  const [moveMode, setMoveMode] = React.useState(false);
 
   const dirtyRef = React.useRef(false);
   const loadedRef = React.useRef(!!normalize(document.canvasData));
@@ -177,7 +196,6 @@ function TreeEditor({ document, readOnly }: Props) {
     }
   }, [document.canvasData]);
 
-  // Undo / redo history.
   const history = React.useRef<TreeData[]>([tree]);
   const historyIndex = React.useRef(0);
 
@@ -245,7 +263,7 @@ function TreeEditor({ document, readOnly }: Props) {
       if (!parent) {
         return;
       }
-      const child = newNode(parent.emoji);
+      const child = newNode();
       commit({
         ...tree,
         nodes: {
@@ -324,10 +342,26 @@ function TreeEditor({ document, readOnly }: Props) {
     [tree, deleteNode]
   );
 
+  // Map each node to its owning root, for the Move tool.
+  const nodeToRoot = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    const assign = (id: string, root: string) => {
+      map[id] = root;
+      tree.nodes[id]?.children.forEach((c) => assign(c, root));
+    };
+    tree.rootIds.forEach((r) => assign(r, r));
+    return map;
+  }, [tree]);
+
   // ---- pan / zoom ----------------------------------------------------------
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [view, setView] = React.useState({ x: 40, y: 40, scale: 1 });
+  const [drag, setDrag] = React.useState<{
+    rootId: string;
+    dx: number;
+    dy: number;
+  } | null>(null);
 
   const onBackgroundPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) {
@@ -378,8 +412,41 @@ function TreeEditor({ document, readOnly }: Props) {
     () => computeLayout(tree),
     [tree]
   );
-  const contentW = width + PADDING * 2;
-  const contentH = height + PADDING * 2;
+  const scaleRef = React.useRef(view.scale);
+  scaleRef.current = view.scale;
+
+  const startTreeDrag = React.useCallback(
+    (id: string, e: React.PointerEvent) => {
+      const rootId = nodeToRoot[id];
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const move = (ev: PointerEvent) => {
+        setDrag({
+          rootId,
+          dx: (ev.clientX - startX) / scaleRef.current,
+          dy: (ev.clientY - startY) / scaleRef.current,
+        });
+      };
+      const up = (ev: PointerEvent) => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        const dx = (ev.clientX - startX) / scaleRef.current;
+        const dy = (ev.clientY - startY) / scaleRef.current;
+        setDrag(null);
+        if (dx || dy) {
+          const root = tree.nodes[rootId];
+          const cur = root.offset ?? { x: 0, y: 0 };
+          updateNode(rootId, { offset: { x: cur.x + dx, y: cur.y + dy } });
+        }
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    },
+    [nodeToRoot, tree, updateNode]
+  );
+
+  const contentW = width;
+  const contentH = height;
 
   const fitToView = React.useCallback(() => {
     const el = containerRef.current;
@@ -395,8 +462,6 @@ function TreeEditor({ document, readOnly }: Props) {
       scale: Math.max(0.15, scale),
     });
   }, [contentW, contentH]);
-
-  // ---- keyboard: undo / redo ----------------------------------------------
 
   React.useEffect(() => {
     const el = containerRef.current;
@@ -425,6 +490,15 @@ function TreeEditor({ document, readOnly }: Props) {
 
   const bg = tree.bgColor || DEFAULT_BG;
   const visibleIds = Object.keys(positions);
+
+  const posOf = (id: string) => {
+    const p = positions[id];
+    if (drag && nodeToRoot[id] === drag.rootId) {
+      return { x: p.x + drag.dx, y: p.y + drag.dy };
+    }
+    return p;
+  };
+
   const edges: Array<{ from: string; to: string }> = [];
   visibleIds.forEach((id) => {
     const node = tree.nodes[id];
@@ -442,6 +516,7 @@ function TreeEditor({ document, readOnly }: Props) {
     <Viewport
       ref={containerRef}
       tabIndex={0}
+      $move={moveMode}
       style={{ background: bg }}
       onPointerDown={onBackgroundPointerDown}
       onWheel={onWheel}
@@ -468,12 +543,12 @@ function TreeEditor({ document, readOnly }: Props) {
             </marker>
           </defs>
           {edges.map(({ from, to }) => {
-            const a = positions[from];
-            const b = positions[to];
-            const sx = PADDING + a.x + NODE_W;
-            const sy = PADDING + a.y + NODE_H / 2;
-            const ex = PADDING + b.x;
-            const ey = PADDING + b.y + NODE_H / 2;
+            const a = posOf(from);
+            const b = posOf(to);
+            const sx = a.x + NODE_W;
+            const sy = a.y + NODE_H / 2;
+            const ex = b.x;
+            const ey = b.y + NODE_H / 2;
             const midX = sx + (ex - sx) / 2;
             return (
               <path
@@ -490,7 +565,7 @@ function TreeEditor({ document, readOnly }: Props) {
 
         {visibleIds.map((id) => {
           const node = tree.nodes[id];
-          const p = positions[id];
+          const p = posOf(id);
           const isSelected = selectedId === id;
           const isEditing = editingId === id;
           const hasChildren = node.children.length > 0;
@@ -498,8 +573,8 @@ function TreeEditor({ document, readOnly }: Props) {
             <NodeBox
               key={id}
               style={{
-                left: PADDING + p.x,
-                top: PADDING + p.y,
+                left: p.x,
+                top: p.y,
                 width: NODE_W,
                 height: NODE_H,
                 background: nodeColor(node),
@@ -507,9 +582,13 @@ function TreeEditor({ document, readOnly }: Props) {
               }}
               onPointerDown={(e) => {
                 e.stopPropagation();
-                setSelectedId(id);
+                if (moveMode && !readOnly) {
+                  startTreeDrag(id, e);
+                } else {
+                  setSelectedId(id);
+                }
               }}
-              onDoubleClick={() => !readOnly && setEditingId(id)}
+              onDoubleClick={() => !readOnly && !moveMode && setEditingId(id)}
             >
               {node.emoji ? <Emoji>{node.emoji}</Emoji> : null}
               {isEditing ? (
@@ -535,15 +614,8 @@ function TreeEditor({ document, readOnly }: Props) {
                 <NodeText>{node.text || t("Untitled")}</NodeText>
               )}
 
-              {isSelected && !readOnly && (
+              {isSelected && !readOnly && !moveMode && (
                 <Toolbar onPointerDown={(e) => e.stopPropagation()}>
-                  <EmojiEdit
-                    title={t("Change icon")}
-                    value={node.emoji ?? ""}
-                    placeholder="🙂"
-                    maxLength={4}
-                    onChange={(e) => updateNode(id, { emoji: e.target.value })}
-                  />
                   <StatusRow>
                     {STATUS_ORDER.map((s) => (
                       <Swatch
@@ -597,6 +669,17 @@ function TreeEditor({ document, readOnly }: Props) {
 
       {!readOnly && (
         <Controls onPointerDown={(e) => e.stopPropagation()}>
+          <Btn
+            title={t("Move tool")}
+            style={
+              moveMode
+                ? { background: "rgba(120,160,255,0.5)" }
+                : undefined
+            }
+            onClick={() => setMoveMode((m) => !m)}
+          >
+            ✋
+          </Btn>
           <Btn title={t("New tree")} onClick={addRoot}>
             + {t("Tree")}
           </Btn>
@@ -641,19 +724,19 @@ function TreeEditor({ document, readOnly }: Props) {
   );
 }
 
-const Viewport = styled.div`
+const Viewport = styled.div<{ $move?: boolean }>`
   position: relative;
   width: 100%;
   height: calc(100vh - 140px);
   min-height: 480px;
   overflow: hidden;
   outline: none;
-  cursor: grab;
+  cursor: ${(p) => (p.$move ? "move" : "grab")};
   touch-action: none;
   user-select: none;
 
   &:active {
-    cursor: grabbing;
+    cursor: ${(p) => (p.$move ? "move" : "grabbing")};
   }
 `;
 
@@ -733,16 +816,6 @@ const Swatch = styled.button`
   border: none;
   padding: 0;
   cursor: pointer;
-`;
-
-const EmojiEdit = styled.input`
-  width: 28px;
-  text-align: center;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(0, 0, 0, 0.25);
-  color: #fff;
-  border-radius: 4px;
-  padding: 2px;
 `;
 
 const ColorInput = styled.input`
