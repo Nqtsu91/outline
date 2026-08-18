@@ -25,3 +25,7 @@ This is a fork of the original [Outline](https://github.com/outline/outline) rep
 - Text Color support
 - Page Groups
 - Custom "Hint" Widget colors
+- Canvas page with Excalidraw
+- Page hidden in website version
+- Enforced Dark Theme
+- Project Tree pages, inspired by Canvas's features
