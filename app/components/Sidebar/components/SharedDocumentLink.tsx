@@ -1,12 +1,16 @@
 import { observer } from "mobx-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
+import styled from "styled-components";
 import Icon from "@shared/components/Icon";
+import { s } from "@shared/styles";
 import type { NavigationNode } from "@shared/types";
+import { NavigationNodeType } from "@shared/types";
 import type Collection from "~/models/Collection";
 import type Document from "~/models/Document";
 import useStores from "~/hooks/useStores";
 import { sharedModelPath } from "~/utils/routeHelpers";
+import Disclosure from "./Disclosure";
 import { useSidebarExpansion } from "./SidebarExpansionContext";
 import SidebarLink from "./SidebarLink";
 
@@ -107,6 +111,45 @@ function DocumentLink(
   const icon = node.icon ?? node.emoji;
   const initial = title ? title.charAt(0).toUpperCase() : "?";
 
+  const renderChildren = () =>
+    expanded &&
+    nodeChildren.map((childNode, index) => (
+      <SharedDocumentLink
+        shareId={shareId}
+        key={childNode.id}
+        collection={collection}
+        node={childNode}
+        activeDocumentId={activeDocumentId}
+        activeDocument={activeDocument}
+        prefetchDocument={prefetchDocument}
+        isDraft={childNode.isDraft}
+        depth={depth + 1}
+        index={index}
+        parentId={node.id}
+      />
+    ));
+
+  // Groups are section headers, not pages — render them like the app sidebar:
+  // flush, bold, brighter, with spacing above, and no navigation link.
+  if (node.type === NavigationNodeType.Group) {
+    return (
+      <>
+        <GroupHeader
+          onClick={hasChildDocuments ? handleDisclosureClick : undefined}
+        >
+          {hasChildDocuments && (
+            <GroupDisclosure expanded={expanded} onClick={handleDisclosureClick} />
+          )}
+          {icon && (
+            <Icon value={icon} color={node.color} initial={initial} size={20} />
+          )}
+          <GroupTitle>{title}</GroupTitle>
+        </GroupHeader>
+        {renderChildren()}
+      </>
+    );
+  }
+
   return (
     <>
       <SidebarLink
@@ -130,24 +173,40 @@ function DocumentLink(
         ref={ref}
         isActive={() => !!isActiveDocument}
       />
-      {expanded &&
-        nodeChildren.map((childNode, index) => (
-          <SharedDocumentLink
-            shareId={shareId}
-            key={childNode.id}
-            collection={collection}
-            node={childNode}
-            activeDocumentId={activeDocumentId}
-            activeDocument={activeDocument}
-            prefetchDocument={prefetchDocument}
-            isDraft={childNode.isDraft}
-            depth={depth + 1}
-            index={index}
-            parentId={node.id}
-          />
-        ))}
+      {renderChildren()}
     </>
   );
 }
+
+const GroupHeader = styled.div`
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  margin-top: 16px;
+  padding-inline: 4px 8px;
+  cursor: pointer;
+  user-select: none;
+`;
+
+const GroupDisclosure = styled(Disclosure)`
+  position: relative;
+  inset-inline-start: auto;
+  margin: 0;
+  flex-shrink: 0;
+`;
+
+const GroupTitle = styled.div`
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: ${s("text")};
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
 
 export const SharedDocumentLink = observer(React.forwardRef(DocumentLink));

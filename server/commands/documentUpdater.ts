@@ -91,6 +91,10 @@ export default async function documentUpdater(
   }
   if (canvasData !== undefined) {
     document.canvasData = canvasData;
+    // Sequelize does not reliably flag JSONB fields as dirty on reassignment,
+    // so mark it changed explicitly — otherwise the update below is skipped and
+    // the canvas/tree data is silently never persisted.
+    document.changed("canvasData", true);
   }
   if (editorVersion) {
     document.editorVersion = editorVersion;
