@@ -200,17 +200,36 @@ function TreeEditor({ document, readOnly }: Props) {
   const historyIndex = React.useRef(0);
 
   const persistTimer = React.useRef<ReturnType<typeof setTimeout>>();
+  const pendingSaveRef = React.useRef<TreeData | null>(null);
   const scheduleSave = React.useCallback(
     (next: TreeData) => {
+      pendingSaveRef.current = next;
       if (persistTimer.current) {
         clearTimeout(persistTimer.current);
       }
       persistTimer.current = setTimeout(() => {
+        pendingSaveRef.current = null;
         void documents.update({
           id: document.id,
           canvasData: next as unknown as JSONObject,
         });
       }, 800);
+    },
+    [documents, document.id]
+  );
+
+  // Guarantee the last edit is saved when navigating away.
+  React.useEffect(
+    () => () => {
+      if (persistTimer.current) {
+        clearTimeout(persistTimer.current);
+      }
+      if (pendingSaveRef.current) {
+        void documents.update({
+          id: document.id,
+          canvasData: pendingSaveRef.current as unknown as JSONObject,
+        });
+      }
     },
     [documents, document.id]
   );
