@@ -91,7 +91,17 @@ function defaultTree(): TreeData {
 }
 
 function normalize(data: unknown): TreeData | null {
-  const d = data as (TreeData & { rootId?: string }) | null;
+  let raw: unknown = data;
+  // Some load paths may deliver canvasData as a JSON string rather than an
+  // object — accept both.
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  const d = raw as (TreeData & { rootId?: string }) | null;
   if (!d || !d.nodes) {
     return null;
   }

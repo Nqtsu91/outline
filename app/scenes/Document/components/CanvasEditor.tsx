@@ -1,4 +1,4 @@
-import { Excalidraw, restoreElements } from "@excalidraw/excalidraw";
+import { Excalidraw } from "@excalidraw/excalidraw";
 // Note: @excalidraw/excalidraw 0.17.x injects its own styles via the JS bundle,
 // so no separate CSS import is required (that path only exists in 0.18+).
 import { observer } from "mobx-react";
@@ -18,39 +18,37 @@ type Props = {
 };
 
 // oxlint-disable no-explicit-any
-type ExcalidrawApi = {
-  updateScene: (scene: any) => void;
-  addFiles: (files: any[]) => void;
-  getSceneElements: () => readonly any[];
-  scrollToContent: (target?: any, opts?: any) => void;
-};
-
-type SceneData = { elements: any[]; files?: any } | null;
+type SceneData = {
+  elements: any[];
+  files?: any;
+  appState?: { viewBackgroundColor?: string };
+} | null;
 
 function toInitialData(data: any): SceneData {
   if (!data || !Array.isArray(data.elements)) {
     return null;
   }
-  // Normalize through Excalidraw's restore helper. This is required for
-  // freehand ("freedraw") strokes to render — injecting raw elements directly
-  // leaves their cached path unregenerated so they appear invisible.
-  const elements = restoreElements(data.elements, null) as any[];
-  return { elements, files: data.files ?? undefined };
+  return {
+    elements: data.elements,
+    files: data.files ?? undefined,
+    // Restore the canvas background so strokes that share the default dark
+    // color remain visible (they'd otherwise vanish on a dark background).
+    appState: data.appState?.viewBackgroundColor
+      ? { viewBackgroundColor: data.appState.viewBackgroundColor }
+      : undefined,
+  };
 }
 
 /**
  * Renders an infinite whiteboard (Excalidraw) for documents of type "canvas".
  * The scene is loaded from and autosaved to the document's `canvasData` field.
- * Real-time collaboration is intentionally not enabled — saves are debounced
- * and last-write-wins.
+ * No real-time collaboration — saves are debounced and last-write-wins.
  */
 function CanvasEditor({ document, readOnly }: Props) {
   const { documents } = useStores();
-  const [api, setApi] = React.useState<ExcalidrawApi | null>(null);
 
-  // Resolve the initial scene before mounting Excalidraw, so a saved drawing is
-  // never missed because `canvasData` arrived a tick after mount. `undefined`
-  // means "still resolving"; `null` means "fresh, empty canvas".
+  // Resolve the initial scene before mounting Excalidraw so a saved drawing is
+  // never missed. `undefined` = still resolving; `null` = fresh empty canvas.
   const [initial, setInitial] = React.useState<SceneData | undefined>(() =>
     document.canvasData ? toInitialData(document.canvasData) : undefined
   );
@@ -69,7 +67,6 @@ function CanvasEditor({ document, readOnly }: Props) {
     if (initial !== undefined) {
       return;
     }
-    // Fall back to an empty canvas if no data has resolved shortly after mount.
     const timer = setTimeout(
       () => setInitial((cur) => (cur === undefined ? null : cur)),
       700
@@ -77,25 +74,12 @@ function CanvasEditor({ document, readOnly }: Props) {
     return () => clearTimeout(timer);
   }, [initial]);
 
-  // Recenter on the saved content once the editor API is ready.
-  const centeredRef = React.useRef(false);
-  React.useEffect(() => {
-    if (!api || centeredRef.current) {
-      return;
-    }
-    const elements = api.getSceneElements();
-    if (elements.length > 0) {
-      centeredRef.current = true;
-      try {
-        api.scrollToContent(elements, { fitToContent: true });
-      } catch (_err) {
-        // scrollToContent signature differs slightly across versions; ignore.
-      }
-    }
-  }, [api, initial]);
-
   // Debounced autosave with a guaranteed flush on unmount.
-  const pendingRef = React.useRef<{ elements: any; files: any } | null>(null);
+  const pendingRef = React.useRef<{
+    elements: any;
+    files: any;
+    viewBackgroundColor?: string;
+  } | null>(null);
   const timerRef = React.useRef<ReturnType<typeof setTimeout>>();
 
   const flush = React.useCallback(() => {
@@ -110,6 +94,7 @@ function CanvasEditor({ document, readOnly }: Props) {
     const canvasData = {
       elements: pending.elements,
       files: pending.files ?? {},
+      appState: { viewBackgroundColor: pending.viewBackgroundColor },
     } as unknown as JSONObject;
     void documents
       .update({ id: document.id, canvasData })
@@ -120,11 +105,15 @@ function CanvasEditor({ document, readOnly }: Props) {
   }, [documents, document.id]);
 
   const handleChange = React.useCallback(
-    (elements: any, _appState: any, files: any) => {
+    (elements: any, appState: any, files: any) => {
       if (readOnly) {
         return;
       }
-      pendingRef.current = { elements, files };
+      pendingRef.current = {
+        elements,
+        files,
+        viewBackgroundColor: appState?.viewBackgroundColor,
+      };
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
@@ -142,7 +131,6 @@ function CanvasEditor({ document, readOnly }: Props) {
   return (
     <Container>
       <Excalidraw
-        excalidrawAPI={setApi as any}
         initialData={
           initial ? { ...initial, scrollToContent: true } : undefined
         }
