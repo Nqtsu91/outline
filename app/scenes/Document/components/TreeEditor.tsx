@@ -213,7 +213,7 @@ function TreeEditor({ document, readOnly }: Props) {
           id: document.id,
           canvasData: next as unknown as JSONObject,
         });
-      }, 800);
+      }, 400);
     },
     [documents, document.id]
   );

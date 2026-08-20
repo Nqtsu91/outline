@@ -128,7 +128,7 @@ function CanvasEditor({ document, readOnly }: Props) {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
-      timerRef.current = setTimeout(flush, 1000);
+      timerRef.current = setTimeout(flush, 400);
     },
     [readOnly, flush]
   );

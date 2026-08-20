@@ -119,7 +119,9 @@ export default async function documentUpdater(
     );
   }
 
-  const changed = document.changed();
+  // `changed` can be `false` for JSONB-only updates even after we flag the
+  // field dirty, so force a save whenever canvas/tree data was provided.
+  const changed = document.changed() || canvasData !== undefined;
   const eventData = done !== undefined ? { done } : undefined;
 
   const event = {
