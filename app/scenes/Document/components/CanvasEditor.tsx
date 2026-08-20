@@ -31,8 +31,8 @@ function toInitialData(data: any): SceneData {
   return {
     elements: data.elements,
     files: data.files ?? undefined,
-    // Restore the canvas background so strokes that share the default dark
-    // color remain visible (they'd otherwise vanish on a dark background).
+    // Restore the canvas background so strokes sharing the default dark color
+    // remain visible (they'd otherwise vanish against a dark background).
     appState: data.appState?.viewBackgroundColor
       ? { viewBackgroundColor: data.appState.viewBackgroundColor }
       : undefined,
@@ -47,32 +47,24 @@ function toInitialData(data: any): SceneData {
 function CanvasEditor({ document, readOnly }: Props) {
   const { documents } = useStores();
 
-  // Resolve the initial scene before mounting Excalidraw so a saved drawing is
-  // never missed. `undefined` = still resolving; `null` = fresh empty canvas.
-  const [initial, setInitial] = React.useState<SceneData | undefined>(() =>
-    document.canvasData ? toInitialData(document.canvasData) : undefined
-  );
-
+  // Force a fresh load so we never mount Excalidraw from a stale/cached
+  // document that is missing its canvasData (the sidebar keeps documents
+  // cached, so opening one otherwise skips the network fetch entirely).
+  const [ready, setReady] = React.useState(false);
   React.useEffect(() => {
-    if (initial !== undefined) {
-      return;
-    }
-    const resolved = toInitialData(document.canvasData);
-    if (resolved) {
-      setInitial(resolved);
-    }
-  }, [document.canvasData, initial]);
-
-  React.useEffect(() => {
-    if (initial !== undefined) {
-      return;
-    }
-    const timer = setTimeout(
-      () => setInitial((cur) => (cur === undefined ? null : cur)),
-      700
-    );
-    return () => clearTimeout(timer);
-  }, [initial]);
+    let cancelled = false;
+    void documents
+      .fetch(document.id, { force: true })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          setReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [documents, document.id]);
 
   // Debounced autosave with a guaranteed flush on unmount.
   const pendingRef = React.useRef<{
@@ -124,9 +116,11 @@ function CanvasEditor({ document, readOnly }: Props) {
 
   React.useEffect(() => () => flush(), [flush]);
 
-  if (initial === undefined) {
+  if (!ready) {
     return <Container />;
   }
+
+  const initial = toInitialData(document.canvasData);
 
   return (
     <Container>

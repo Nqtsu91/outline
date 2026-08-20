@@ -179,7 +179,7 @@ function computeLayout(tree: TreeData): {
   };
 }
 
-function TreeEditor({ document, readOnly }: Props) {
+function TreeEditorInner({ document, readOnly }: Props) {
   const { t } = useTranslation();
   const { documents } = useStores();
 
@@ -751,6 +751,42 @@ function TreeEditor({ document, readOnly }: Props) {
       )}
     </Viewport>
   );
+}
+
+/**
+ * Wrapper that forces a fresh document fetch before mounting the editor, so the
+ * tree is always initialized from the latest saved data rather than a stale
+ * cached model (the sidebar keeps documents cached, so opening one otherwise
+ * skips the network fetch and its canvasData).
+ */
+function TreeEditor({ document, readOnly }: Props) {
+  const { documents } = useStores();
+  const [ready, setReady] = React.useState(
+    () => !!normalize(document.canvasData)
+  );
+
+  React.useEffect(() => {
+    if (ready) {
+      return;
+    }
+    let cancelled = false;
+    void documents
+      .fetch(document.id, { force: true })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          setReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, documents, document.id]);
+
+  if (!ready) {
+    return <Viewport style={{ background: DEFAULT_BG }} />;
+  }
+  return <TreeEditorInner document={document} readOnly={readOnly} />;
 }
 
 const Viewport = styled.div<{ $move?: boolean }>`
