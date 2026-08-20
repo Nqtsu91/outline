@@ -8,6 +8,7 @@ import styled from "styled-components";
 import type { JSONObject } from "@shared/types";
 import type Document from "~/models/Document";
 import Logger from "~/utils/Logger";
+import { client } from "~/utils/ApiClient";
 import useStores from "~/hooks/useStores";
 
 type Props = {
@@ -47,24 +48,32 @@ function toInitialData(data: any): SceneData {
 function CanvasEditor({ document, readOnly }: Props) {
   const { documents } = useStores();
 
-  // Force a fresh load so we never mount Excalidraw from a stale/cached
-  // document that is missing its canvasData (the sidebar keeps documents
-  // cached, so opening one otherwise skips the network fetch entirely).
-  const [ready, setReady] = React.useState(false);
+  // Load the scene straight from the server rather than the store, which keeps
+  // documents cached (so opening one skips the fetch) and can hand us a stale
+  // model without canvasData. `undefined` = loading; `null` = empty canvas.
+  const [initial, setInitial] = React.useState<SceneData | undefined>(
+    undefined
+  );
   React.useEffect(() => {
     let cancelled = false;
-    void documents
-      .fetch(document.id, { force: true })
-      .catch(() => undefined)
-      .finally(() => {
+    void client
+      .post("/documents.info", { id: document.id })
+      .then((res: any) => {
+        if (cancelled) {
+          return;
+        }
+        const doc = res?.data?.document ?? res?.data;
+        setInitial(toInitialData(doc?.canvasData));
+      })
+      .catch(() => {
         if (!cancelled) {
-          setReady(true);
+          setInitial(null);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [documents, document.id]);
+  }, [document.id]);
 
   // Debounced autosave with a guaranteed flush on unmount.
   const pendingRef = React.useRef<{
@@ -116,11 +125,9 @@ function CanvasEditor({ document, readOnly }: Props) {
 
   React.useEffect(() => () => flush(), [flush]);
 
-  if (!ready) {
+  if (initial === undefined) {
     return <Container />;
   }
-
-  const initial = toInitialData(document.canvasData);
 
   return (
     <Container>

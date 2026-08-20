@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import type { JSONObject } from "@shared/types";
 import type Document from "~/models/Document";
+import { client } from "~/utils/ApiClient";
 import useStores from "~/hooks/useStores";
 
 /**
@@ -179,32 +180,21 @@ function computeLayout(tree: TreeData): {
   };
 }
 
-function TreeEditorInner({ document, readOnly }: Props) {
+function TreeEditorInner({
+  document,
+  readOnly,
+  initialTree,
+}: Props & { initialTree: TreeData }) {
   const { t } = useTranslation();
   const { documents } = useStores();
 
-  const [tree, setTree] = React.useState<TreeData>(
-    () => normalize(document.canvasData) ?? defaultTree()
-  );
+  const [tree, setTree] = React.useState<TreeData>(initialTree);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(
     null
   );
   const [moveMode, setMoveMode] = React.useState(false);
-
-  const dirtyRef = React.useRef(false);
-  const loadedRef = React.useRef(!!normalize(document.canvasData));
-  React.useEffect(() => {
-    if (loadedRef.current || dirtyRef.current) {
-      return;
-    }
-    const incoming = normalize(document.canvasData);
-    if (incoming) {
-      loadedRef.current = true;
-      setTree(incoming);
-    }
-  }, [document.canvasData]);
 
   const history = React.useRef<TreeData[]>([tree]);
   const historyIndex = React.useRef(0);
@@ -246,7 +236,6 @@ function TreeEditorInner({ document, readOnly }: Props) {
 
   const commit = React.useCallback(
     (next: TreeData) => {
-      dirtyRef.current = true;
       history.current = history.current.slice(0, historyIndex.current + 1);
       history.current.push(next);
       historyIndex.current = history.current.length - 1;
@@ -760,33 +749,42 @@ function TreeEditorInner({ document, readOnly }: Props) {
  * skips the network fetch and its canvasData).
  */
 function TreeEditor({ document, readOnly }: Props) {
-  const { documents } = useStores();
-  const [ready, setReady] = React.useState(
-    () => !!normalize(document.canvasData)
+  const [initialTree, setInitialTree] = React.useState<TreeData | undefined>(
+    undefined
   );
 
   React.useEffect(() => {
-    if (ready) {
-      return;
-    }
     let cancelled = false;
-    void documents
-      .fetch(document.id, { force: true })
-      .catch(() => undefined)
-      .finally(() => {
+    void client
+      .post("/documents.info", { id: document.id })
+      // oxlint-disable-next-line no-explicit-any
+      .then((res: any) => {
+        if (cancelled) {
+          return;
+        }
+        const doc = res?.data?.document ?? res?.data;
+        setInitialTree(normalize(doc?.canvasData) ?? defaultTree());
+      })
+      .catch(() => {
         if (!cancelled) {
-          setReady(true);
+          setInitialTree(defaultTree());
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [ready, documents, document.id]);
+  }, [document.id]);
 
-  if (!ready) {
+  if (!initialTree) {
     return <Viewport style={{ background: DEFAULT_BG }} />;
   }
-  return <TreeEditorInner document={document} readOnly={readOnly} />;
+  return (
+    <TreeEditorInner
+      document={document}
+      readOnly={readOnly}
+      initialTree={initialTree}
+    />
+  );
 }
 
 const Viewport = styled.div<{ $move?: boolean }>`
