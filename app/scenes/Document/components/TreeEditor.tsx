@@ -11,14 +11,16 @@ import useStores from "~/hooks/useStores";
  * Project tree editor.
  *
  * An infinite, dark canvas that renders one or more self-aligning trees of
- * rectangular nodes connected by elbow arrows. Nodes carry text, a status color
- * and an optional custom color. On top of the auto-layout:
- *  - any node can be dragged freely (Move tool); it takes its own sub-tree with
- *    it while its parent stays put, and connections stretch live.
- *  - arbitrary links can be drawn between nodes via the four handles that appear
- *    when hovering a node; multiple links may target the same node.
+ * rectangular nodes connected by arrows (global elbow/curved style). Nodes
+ * carry text, a status color and an optional custom color. Controls:
+ *  - left-drag on a node moves it alone (its children stay put);
+ *  - Shift+left-drag moves the node with its sub-tree and manual-link targets;
+ *  - right-drag (or left-drag on the background) pans the camera;
+ *  - hovering a node shows four handles to draw manual links; multiple links
+ *    may target the same node, and clicking a link removes it.
  *
- * Supports pan/zoom, fit-to-view, undo/redo and autosave.
+ * Supports pan/zoom, fit-to-view, undo/redo and autosave. Connections stretch
+ * live while dragging.
  */
 
 type TreeStatus = "not_started" | "in_progress" | "to_validate" | "done";
@@ -317,7 +319,6 @@ function TreeEditorInner({
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(
     null
   );
-  const [moveMode, setMoveMode] = React.useState(false);
 
   const history = React.useRef<TreeData[]>([tree]);
   const historyIndex = React.useRef(0);
@@ -503,13 +504,13 @@ function TreeEditorInner({
   const viewRef = React.useRef(view);
   viewRef.current = view;
 
-  const onBackgroundPointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) {
-      return;
-    }
-    setSelectedId(null);
-    setEditingId(null);
-    const start = { x: e.clientX, y: e.clientY, ox: view.x, oy: view.y };
+  const startPan = React.useCallback((e: React.PointerEvent) => {
+    const start = {
+      x: e.clientX,
+      y: e.clientY,
+      ox: viewRef.current.x,
+      oy: viewRef.current.y,
+    };
     const move = (ev: PointerEvent) => {
       setView((v) => ({
         ...v,
@@ -523,6 +524,23 @@ function TreeEditorInner({
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+  }, []);
+
+  const onBackgroundPointerDown = (e: React.PointerEvent) => {
+    // Right-drag pans the camera from anywhere on the canvas (nodes let
+    // right-clicks bubble up to here).
+    if (e.button === 2) {
+      startPan(e);
+      return;
+    }
+    if (e.button !== 0) {
+      return;
+    }
+    // Left-drag on empty background also pans, and clears the selection.
+    setSelectedId(null);
+    setEditingId(null);
+    setLinkMenu(null);
+    startPan(e);
   };
 
   const onWheel = (e: React.WheelEvent) => {
@@ -648,48 +666,84 @@ function TreeEditorInner({
     return map;
   }, [tree]);
 
-  const startNodeDrag = React.useCallback(
+  /**
+   * Left-drag on a node moves it alone; Shift+left-drag moves it with its
+   * whole sub-tree (children and manual-link targets). A plain click (below
+   * the 4px drag threshold) only selects. Right-drag pans the camera and is
+   * handled at the viewport level.
+   */
+  const onNodePointerDown = React.useCallback(
     (id: string, e: React.PointerEvent) => {
-      // The moved region: the node's sub-tree plus everything reachable by
-      // following manual links in the direction of their arrow (cycle-safe),
-      // so linked nodes travel together like children do.
-      const subtree = new Set<string>();
-      const stack = [id];
-      while (stack.length) {
-        const cur = stack.pop() as string;
-        if (subtree.has(cur) || !tree.nodes[cur]) {
-          continue;
-        }
-        subtree.add(cur);
-        tree.nodes[cur].children.forEach((c) => stack.push(c));
-        (tree.links ?? []).forEach((l) => {
-          if (l.from === cur) {
-            stack.push(l.to);
-          }
-        });
+      if (e.button !== 0) {
+        // Let right-clicks bubble up to the viewport for camera panning.
+        return;
       }
+      e.stopPropagation();
+      setSelectedId(id);
+      setLinkMenu(null);
+      if (readOnly) {
+        return;
+      }
+
+      const withSubtree = e.shiftKey;
+      const moved = new Set<string>();
+      if (withSubtree) {
+        // Sub-tree plus everything reachable by following manual links in the
+        // direction of their arrow (cycle-safe).
+        const stack = [id];
+        while (stack.length) {
+          const cur = stack.pop() as string;
+          if (moved.has(cur) || !tree.nodes[cur]) {
+            continue;
+          }
+          moved.add(cur);
+          tree.nodes[cur].children.forEach((c) => stack.push(c));
+          (tree.links ?? []).forEach((l) => {
+            if (l.from === cur) {
+              stack.push(l.to);
+            }
+          });
+        }
+      } else {
+        moved.add(id);
+      }
+
       const startX = e.clientX;
       const startY = e.clientY;
+      let dragging = false;
       const move = (ev: PointerEvent) => {
-        setDrag({
-          subtree,
-          dx: (ev.clientX - startX) / viewRef.current.scale,
-          dy: (ev.clientY - startY) / viewRef.current.scale,
-        });
+        const dxs = ev.clientX - startX;
+        const dys = ev.clientY - startY;
+        if (!dragging && Math.hypot(dxs, dys) > 4) {
+          dragging = true;
+        }
+        if (dragging) {
+          setDrag({
+            subtree: moved,
+            dx: dxs / viewRef.current.scale,
+            dy: dys / viewRef.current.scale,
+          });
+        }
       };
       const up = (ev: PointerEvent) => {
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", up);
+        setDrag(null);
+        if (!dragging) {
+          return;
+        }
         const dx = (ev.clientX - startX) / viewRef.current.scale;
         const dy = (ev.clientY - startY) / viewRef.current.scale;
-        setDrag(null);
-        if (dx || dy) {
+        if (!dx && !dy) {
+          return;
+        }
+        const nodes = { ...tree.nodes };
+        if (withSubtree) {
           // Offset every "root" of the moved region — nodes whose tree-parent
           // did not move. Their descendants follow via the cumulative layout.
-          const nodes = { ...tree.nodes };
-          subtree.forEach((nid) => {
+          moved.forEach((nid) => {
             const parent = parentOf[nid];
-            if (parent && subtree.has(parent)) {
+            if (parent && moved.has(parent)) {
               return;
             }
             const cur = nodes[nid].offset ?? { x: 0, y: 0 };
@@ -698,13 +752,31 @@ function TreeEditorInner({
               offset: { x: cur.x + dx, y: cur.y + dy },
             };
           });
-          commit({ ...tree, nodes });
+        } else {
+          // Move the node alone: shift it, and compensate its direct children
+          // so they stay exactly where they were.
+          const cur = nodes[id].offset ?? { x: 0, y: 0 };
+          nodes[id] = {
+            ...nodes[id],
+            offset: { x: cur.x + dx, y: cur.y + dy },
+          };
+          nodes[id].children.forEach((c) => {
+            if (!nodes[c]) {
+              return;
+            }
+            const co = nodes[c].offset ?? { x: 0, y: 0 };
+            nodes[c] = {
+              ...nodes[c],
+              offset: { x: co.x - dx, y: co.y - dy },
+            };
+          });
         }
+        commit({ ...tree, nodes });
       };
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up);
     },
-    [tree, parentOf, commit]
+    [tree, parentOf, commit, readOnly]
   );
 
   // ---- creating a manual link ---------------------------------------------
@@ -715,8 +787,20 @@ function TreeEditorInner({
   } | null>(null);
   const [linkCursor, setLinkCursor] = React.useState<Point | null>(null);
 
+  // Small contextual menu opened by clicking an arrow, to delete it safely
+  // instead of removing it on a bare click. Coordinates are viewport-relative.
+  const [linkMenu, setLinkMenu] = React.useState<{
+    linkId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
   const startLink = React.useCallback(
     (id: string, side: Side, e: React.PointerEvent) => {
+      if (e.button !== 0) {
+        // Let right-clicks bubble up for camera panning.
+        return;
+      }
       e.stopPropagation();
       setLinking({ from: id, fromSide: side });
       setLinkCursor(toWorld(e.clientX, e.clientY));
@@ -808,9 +892,9 @@ function TreeEditorInner({
     <Viewport
       ref={containerRef}
       tabIndex={0}
-      $move={moveMode}
       style={{ background: bg }}
       onPointerDown={onBackgroundPointerDown}
+      onContextMenu={(e) => e.preventDefault()}
       onWheel={onWheel}
     >
       <World
@@ -851,32 +935,51 @@ function TreeEditorInner({
             );
           })}
 
-          {links.map((l) => (
-            <path
-              key={`l-${l.id}`}
-              d={routeEdge(
-                posOf(l.from),
-                l.fromSide,
-                posOf(l.to),
-                l.toSide,
-                arrowStyle
-              )}
-              fill="none"
-              stroke="rgba(255,255,255,0.35)"
-              strokeWidth={2}
-              markerEnd="url(#tree-arrow)"
-              style={{
-                pointerEvents: readOnly ? "none" : "stroke",
-                cursor: "pointer",
-              }}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                if (!readOnly) {
-                  removeLink(l.id);
-                }
-              }}
-            />
-          ))}
+          {links.map((l) => {
+            const d = routeEdge(
+              posOf(l.from),
+              l.fromSide,
+              posOf(l.to),
+              l.toSide,
+              arrowStyle
+            );
+            const active = linkMenu?.linkId === l.id;
+            return (
+              <g key={`l-${l.id}`}>
+                <path
+                  d={d}
+                  fill="none"
+                  stroke={
+                    active ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.35)"
+                  }
+                  strokeWidth={2}
+                  markerEnd="url(#tree-arrow)"
+                />
+                {!readOnly && (
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={14}
+                    style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) {
+                        return;
+                      }
+                      e.stopPropagation();
+                      const rect =
+                        containerRef.current?.getBoundingClientRect();
+                      setLinkMenu({
+                        linkId: l.id,
+                        x: e.clientX - (rect?.left ?? 0),
+                        y: e.clientY - (rect?.top ?? 0),
+                      });
+                    }}
+                  />
+                )}
+              </g>
+            );
+          })}
 
           {linking && linkCursor && positions[linking.from] && (
             <path
@@ -900,7 +1003,7 @@ function TreeEditorInner({
           const isSelected = selectedId === id;
           const isEditing = editingId === id;
           const showHandles =
-            !readOnly && !moveMode && (hoveredId === id || linking !== null);
+            !readOnly && (hoveredId === id || linking !== null);
           const hasChildren = node.children.length > 0;
           return (
             <NodePositioner
@@ -918,17 +1021,8 @@ function TreeEditorInner({
                   background: nodeColor(node),
                   outline: isSelected ? "2px solid #ffffff" : "none",
                 }}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  if (moveMode && !readOnly) {
-                    startNodeDrag(id, e);
-                  } else {
-                    setSelectedId(id);
-                  }
-                }}
-                onDoubleClick={() =>
-                  !readOnly && !moveMode && setEditingId(id)
-                }
+                onPointerDown={(e) => onNodePointerDown(id, e)}
+                onDoubleClick={() => !readOnly && setEditingId(id)}
               >
                 {node.emoji ? <Emoji>{node.emoji}</Emoji> : null}
                 {isEditing ? (
@@ -968,7 +1062,7 @@ function TreeEditorInner({
                   />
                 ))}
 
-              {isSelected && !readOnly && !moveMode && (
+              {isSelected && !readOnly && (
                 <Toolbar onPointerDown={(e) => e.stopPropagation()}>
                   <StatusRow>
                     {STATUS_ORDER.map((s) => (
@@ -1021,17 +1115,26 @@ function TreeEditorInner({
         })}
       </World>
 
+      {linkMenu && !readOnly && (
+        <LinkMenu
+          style={{ left: linkMenu.x, top: linkMenu.y }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <Btn
+            $danger
+            onClick={() => {
+              removeLink(linkMenu.linkId);
+              setLinkMenu(null);
+            }}
+          >
+            🗑 {t("Delete")}
+          </Btn>
+          <Btn onClick={() => setLinkMenu(null)}>{t("Cancel")}</Btn>
+        </LinkMenu>
+      )}
+
       {!readOnly && (
         <Controls onPointerDown={(e) => e.stopPropagation()}>
-          <Btn
-            title={t("Move tool")}
-            style={
-              moveMode ? { background: "rgba(120,160,255,0.5)" } : undefined
-            }
-            onClick={() => setMoveMode((m) => !m)}
-          >
-            ✋
-          </Btn>
           <Btn title={t("New tree")} onClick={addRoot}>
             + {t("Tree")}
           </Btn>
@@ -1131,19 +1234,19 @@ function TreeEditor({ document, readOnly }: Props) {
   );
 }
 
-const Viewport = styled.div<{ $move?: boolean }>`
+const Viewport = styled.div`
   position: relative;
   width: 100%;
   height: calc(100vh - 140px);
   min-height: 480px;
   overflow: hidden;
   outline: none;
-  cursor: ${(p) => (p.$move ? "move" : "grab")};
+  cursor: grab;
   touch-action: none;
   user-select: none;
 
   &:active {
-    cursor: ${(p) => (p.$move ? "move" : "grabbing")};
+    cursor: grabbing;
   }
 `;
 
@@ -1283,6 +1386,19 @@ const Btn = styled.button<{ $danger?: boolean }>`
     background: ${(p) =>
       p.$danger ? "rgba(200,60,60,0.5)" : "rgba(255,255,255,0.2)"};
   }
+`;
+
+const LinkMenu = styled.div`
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: #2b2f2d;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  z-index: 6;
 `;
 
 const Controls = styled.div`
