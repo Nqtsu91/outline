@@ -572,6 +572,52 @@ function TreeEditorInner({
     });
   }, [bounds]);
 
+  // Frame the camera on the content once at open. This replaces the old layout
+  // normalization: nodes keep their absolute positions, only the camera moves,
+  // so existing trees are always discoverable wherever they were dragged.
+  const framedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!framedRef.current) {
+      framedRef.current = true;
+      fitToView();
+    }
+  }, [fitToView]);
+
+  // When a node enters edit mode (e.g. it was just created off-screen, like a
+  // new tree stacked below the others), pan the camera just enough to reveal
+  // it — the nodes themselves never move.
+  React.useEffect(() => {
+    if (!editingId) {
+      return;
+    }
+    const p = positions[editingId];
+    const el = containerRef.current;
+    if (!p || !el) {
+      return;
+    }
+    const v = viewRef.current;
+    const sx = p.x * v.scale + v.x;
+    const sy = p.y * v.scale + v.y;
+    const vw = el.clientWidth;
+    const vh = el.clientHeight;
+    const margin = 40;
+    let dx = 0;
+    let dy = 0;
+    if (sx < margin) {
+      dx = margin - sx;
+    } else if (sx + NODE_W * v.scale > vw - margin) {
+      dx = vw - margin - (sx + NODE_W * v.scale);
+    }
+    if (sy < margin) {
+      dy = margin - sy;
+    } else if (sy + NODE_H * v.scale > vh - margin) {
+      dy = vh - margin - (sy + NODE_H * v.scale);
+    }
+    if (dx || dy) {
+      setView((cur) => ({ ...cur, x: cur.x + dx, y: cur.y + dy }));
+    }
+  }, [editingId, positions]);
+
   // World coords from a screen event.
   const toWorld = React.useCallback((clientX: number, clientY: number) => {
     const el = containerRef.current;
