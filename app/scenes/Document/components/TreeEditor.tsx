@@ -196,6 +196,38 @@ function pickSides(a: Point, b: Point): { aSide: Side; bSide: Side } {
     : { aSide: "top", bSide: "bottom" };
 }
 
+const SIDE_VECS: Record<Side, Point> = {
+  top: { x: 0, y: -1 },
+  bottom: { x: 0, y: 1 },
+  left: { x: -1, y: 0 },
+  right: { x: 1, y: 0 },
+};
+
+/**
+ * Returns the stored sides when they still roughly face the other node, and
+ * falls back to geometry-picked sides otherwise. This prevents arrows from
+ * making U-turns and crossing through nodes after the nodes have been moved
+ * to the opposite side of their link anchors.
+ */
+function effectiveSides(
+  pa: Point,
+  aSide: Side,
+  pb: Point,
+  bSide: Side
+): { aSide: Side; bSide: Side } {
+  const ca = centerOf(pa);
+  const cb = centerOf(pb);
+  const vx = cb.x - ca.x;
+  const vy = cb.y - ca.y;
+  const picked = pickSides(pa, pb);
+  const aDot = SIDE_VECS[aSide].x * vx + SIDE_VECS[aSide].y * vy;
+  const bDot = SIDE_VECS[bSide].x * -vx + SIDE_VECS[bSide].y * -vy;
+  return {
+    aSide: aDot >= 0 ? aSide : picked.aSide,
+    bSide: bDot >= 0 ? bSide : picked.bSide,
+  };
+}
+
 /**
  * Builds the SVG path for an edge between two nodes in the canvas-wide style.
  * Both styles leave the source and enter the target perpendicular to the
@@ -936,13 +968,10 @@ function TreeEditorInner({
           })}
 
           {links.map((l) => {
-            const d = routeEdge(
-              posOf(l.from),
-              l.fromSide,
-              posOf(l.to),
-              l.toSide,
-              arrowStyle
-            );
+            const pa = posOf(l.from);
+            const pb = posOf(l.to);
+            const sides = effectiveSides(pa, l.fromSide, pb, l.toSide);
+            const d = routeEdge(pa, sides.aSide, pb, sides.bSide, arrowStyle);
             const active = linkMenu?.linkId === l.id;
             return (
               <g key={`l-${l.id}`}>
@@ -969,10 +998,12 @@ function TreeEditorInner({
                       e.stopPropagation();
                       const rect =
                         containerRef.current?.getBoundingClientRect();
+                      // Offset below the cursor so the menu doesn't sit right
+                      // under the pointer, which invited accidental clicks.
                       setLinkMenu({
                         linkId: l.id,
-                        x: e.clientX - (rect?.left ?? 0),
-                        y: e.clientY - (rect?.top ?? 0),
+                        x: e.clientX - (rect?.left ?? 0) - 20,
+                        y: e.clientY - (rect?.top ?? 0) + 28,
                       });
                     }}
                   />
