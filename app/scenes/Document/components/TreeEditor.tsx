@@ -49,6 +49,8 @@ type TreeData = {
   nodes: Record<string, TreeNode>;
   links?: TreeLink[];
   bgColor?: string;
+  /** Global connector style for every arrow on this canvas. */
+  arrowStyle?: "elbow" | "curved";
 };
 
 type Props = {
@@ -60,7 +62,6 @@ const NODE_W = 190;
 const NODE_H = 56;
 const H_GAP = 72;
 const V_GAP = 18;
-const PADDING = 120;
 const TREE_GAP = 2;
 const DEFAULT_BG = "#1b211f";
 
@@ -116,10 +117,22 @@ function normalize(data: unknown): TreeData | null {
   }
   const links = Array.isArray(d.links) ? d.links : [];
   if (Array.isArray(d.rootIds) && d.rootIds.length) {
-    return { rootIds: d.rootIds, nodes: d.nodes, links, bgColor: d.bgColor };
+    return {
+      rootIds: d.rootIds,
+      nodes: d.nodes,
+      links,
+      bgColor: d.bgColor,
+      arrowStyle: d.arrowStyle,
+    };
   }
   if (d.rootId && d.nodes[d.rootId]) {
-    return { rootIds: [d.rootId], nodes: d.nodes, links, bgColor: d.bgColor };
+    return {
+      rootIds: [d.rootId],
+      nodes: d.nodes,
+      links,
+      bgColor: d.bgColor,
+      arrowStyle: d.arrowStyle,
+    };
   }
   return null;
 }
@@ -154,14 +167,78 @@ function control(a: Point, side: Side, dist = 60): Point {
   }
 }
 
+const centerOf = (p: Point): Point => ({
+  x: p.x + NODE_W / 2,
+  y: p.y + NODE_H / 2,
+});
+
+const isHorizontal = (s: Side) => s === "left" || s === "right";
+
+/**
+ * Picks the pair of node sides an edge should connect, based on the relative
+ * position of the two nodes, so the arrow always enters the target from an
+ * outer face and its head is never hidden behind the node.
+ */
+function pickSides(a: Point, b: Point): { aSide: Side; bSide: Side } {
+  const ca = centerOf(a);
+  const cb = centerOf(b);
+  const dx = cb.x - ca.x;
+  const dy = cb.y - ca.y;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0
+      ? { aSide: "right", bSide: "left" }
+      : { aSide: "left", bSide: "right" };
+  }
+  return dy >= 0
+    ? { aSide: "bottom", bSide: "top" }
+    : { aSide: "top", bSide: "bottom" };
+}
+
+/**
+ * Builds the SVG path for an edge between two nodes in the canvas-wide style.
+ * Both styles leave the source and enter the target perpendicular to the
+ * chosen sides, keeping the arrowhead outside the node rectangle.
+ */
+function routeEdge(
+  pa: Point,
+  aSide: Side,
+  pb: Point,
+  bSide: Side,
+  style: "elbow" | "curved"
+): string {
+  const a = anchor(pa, aSide);
+  const b = anchor(pb, bSide);
+  if (style === "curved") {
+    const c1 = control(a, aSide);
+    const c2 = control(b, bSide);
+    return `M ${a.x} ${a.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${b.x} ${b.y}`;
+  }
+  const ea = control(a, aSide, 24);
+  const eb = control(b, bSide, 24);
+  let mid: string;
+  if (isHorizontal(aSide) && isHorizontal(bSide)) {
+    const midX = (ea.x + eb.x) / 2;
+    mid = `L ${midX} ${ea.y} L ${midX} ${eb.y}`;
+  } else if (!isHorizontal(aSide) && !isHorizontal(bSide)) {
+    const midY = (ea.y + eb.y) / 2;
+    mid = `L ${ea.x} ${midY} L ${eb.x} ${midY}`;
+  } else if (isHorizontal(aSide)) {
+    mid = `L ${eb.x} ${ea.y}`;
+  } else {
+    mid = `L ${ea.x} ${eb.y}`;
+  }
+  return `M ${a.x} ${a.y} L ${ea.x} ${ea.y} ${mid} L ${eb.x} ${eb.y} L ${b.x} ${b.y}`;
+}
+
 /**
  * Two-pass layout: a tidy auto-layout, then per-node manual offsets applied
  * cumulatively down the tree so moving a node carries its whole sub-tree.
+ * Positions are absolute and stable — the canvas never re-anchors content to
+ * fit the viewport when a node moves.
  */
 function computeLayout(tree: TreeData): {
   positions: Positions;
-  width: number;
-  height: number;
+  bounds: { minX: number; minY: number; maxX: number; maxY: number };
 } {
   const base: Positions = {};
   let leaf = 0;
@@ -204,33 +281,24 @@ function computeLayout(tree: TreeData): {
   };
   tree.rootIds.forEach((rootId) => walkCum(rootId, 0, 0));
 
-  const combined: Positions = {};
+  const positions: Positions = {};
   Object.keys(base).forEach((id) => {
-    combined[id] = {
+    positions[id] = {
       x: base[id].x + (cum[id]?.x ?? 0),
       y: base[id].y + (cum[id]?.y ?? 0),
     };
   });
 
-  const xs = Object.values(combined).map((p) => p.x);
-  const ys = Object.values(combined).map((p) => p.y);
-  const minX = xs.length ? Math.min(...xs) : 0;
-  const minY = ys.length ? Math.min(...ys) : 0;
-  const maxX = xs.length ? Math.max(...xs) : 0;
-  const maxY = ys.length ? Math.max(...ys) : 0;
-
-  const positions: Positions = {};
-  Object.keys(combined).forEach((id) => {
-    positions[id] = {
-      x: combined[id].x - minX + PADDING,
-      y: combined[id].y - minY + PADDING,
-    };
-  });
-
+  const xs = Object.values(positions).map((p) => p.x);
+  const ys = Object.values(positions).map((p) => p.y);
   return {
     positions,
-    width: maxX - minX + NODE_W + PADDING * 2,
-    height: maxY - minY + NODE_H + PADDING * 2,
+    bounds: {
+      minX: xs.length ? Math.min(...xs) : 0,
+      minY: ys.length ? Math.min(...ys) : 0,
+      maxX: xs.length ? Math.max(...xs) : 0,
+      maxY: ys.length ? Math.max(...ys) : 0,
+    },
   };
 }
 
@@ -480,10 +548,12 @@ function TreeEditorInner({
       scale: Math.min(2.5, Math.max(0.15, v.scale * factor)),
     }));
 
-  const { positions, width, height } = React.useMemo(
+  const { positions, bounds } = React.useMemo(
     () => computeLayout(tree),
     [tree]
   );
+  const svgW = Math.max(1, bounds.maxX + NODE_W + 400);
+  const svgH = Math.max(1, bounds.maxY + NODE_H + 400);
 
   const fitToView = React.useCallback(() => {
     const el = containerRef.current;
@@ -492,13 +562,15 @@ function TreeEditorInner({
     }
     const vw = el.clientWidth;
     const vh = el.clientHeight;
-    const scale = Math.min(vw / width, vh / height, 1) * 0.95;
+    const bw = bounds.maxX - bounds.minX + NODE_W + 80;
+    const bh = bounds.maxY - bounds.minY + NODE_H + 80;
+    const scale = Math.max(0.15, Math.min(vw / bw, vh / bh, 1) * 0.95);
     setView({
-      x: (vw - width * scale) / 2,
-      y: (vh - height * scale) / 2,
-      scale: Math.max(0.15, scale),
+      x: (vw - bw * scale) / 2 - (bounds.minX - 40) * scale,
+      y: (vh - bh * scale) / 2 - (bounds.minY - 40) * scale,
+      scale,
     });
-  }, [width, height]);
+  }, [bounds]);
 
   // World coords from a screen event.
   const toWorld = React.useCallback((clientX: number, clientY: number) => {
@@ -519,9 +591,37 @@ function TreeEditorInner({
     dy: number;
   } | null>(null);
 
+  // Map each node to its tree-parent (children arrays only).
+  const parentOf = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    Object.values(tree.nodes).forEach((n) =>
+      n.children.forEach((c) => {
+        map[c] = n.id;
+      })
+    );
+    return map;
+  }, [tree]);
+
   const startNodeDrag = React.useCallback(
     (id: string, e: React.PointerEvent) => {
-      const subtree = new Set(collectSubtree(id, []));
+      // The moved region: the node's sub-tree plus everything reachable by
+      // following manual links in the direction of their arrow (cycle-safe),
+      // so linked nodes travel together like children do.
+      const subtree = new Set<string>();
+      const stack = [id];
+      while (stack.length) {
+        const cur = stack.pop() as string;
+        if (subtree.has(cur) || !tree.nodes[cur]) {
+          continue;
+        }
+        subtree.add(cur);
+        tree.nodes[cur].children.forEach((c) => stack.push(c));
+        (tree.links ?? []).forEach((l) => {
+          if (l.from === cur) {
+            stack.push(l.to);
+          }
+        });
+      }
       const startX = e.clientX;
       const startY = e.clientY;
       const move = (ev: PointerEvent) => {
@@ -538,14 +638,27 @@ function TreeEditorInner({
         const dy = (ev.clientY - startY) / viewRef.current.scale;
         setDrag(null);
         if (dx || dy) {
-          const cur = tree.nodes[id].offset ?? { x: 0, y: 0 };
-          updateNode(id, { offset: { x: cur.x + dx, y: cur.y + dy } });
+          // Offset every "root" of the moved region — nodes whose tree-parent
+          // did not move. Their descendants follow via the cumulative layout.
+          const nodes = { ...tree.nodes };
+          subtree.forEach((nid) => {
+            const parent = parentOf[nid];
+            if (parent && subtree.has(parent)) {
+              return;
+            }
+            const cur = nodes[nid].offset ?? { x: 0, y: 0 };
+            nodes[nid] = {
+              ...nodes[nid],
+              offset: { x: cur.x + dx, y: cur.y + dy },
+            };
+          });
+          commit({ ...tree, nodes });
         }
       };
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up);
     },
-    [collectSubtree, tree, updateNode]
+    [tree, parentOf, commit]
   );
 
   // ---- creating a manual link ---------------------------------------------
@@ -618,6 +731,7 @@ function TreeEditorInner({
   // ---- render --------------------------------------------------------------
 
   const bg = tree.bgColor || DEFAULT_BG;
+  const arrowStyle: "elbow" | "curved" = tree.arrowStyle ?? "elbow";
   const visibleIds = Object.keys(positions);
   const posOf = (id: string): Point => {
     const p = positions[id];
@@ -656,11 +770,11 @@ function TreeEditorInner({
       <World
         style={{
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
-          width,
-          height,
+          width: svgW,
+          height: svgH,
         }}
       >
-        <Edges width={width} height={height}>
+        <Edges width={svgW} height={svgH}>
           <defs>
             <marker
               id="tree-arrow"
@@ -673,31 +787,16 @@ function TreeEditorInner({
             >
               <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,0.5)" />
             </marker>
-            <marker
-              id="link-arrow"
-              viewBox="0 0 10 10"
-              refX="8"
-              refY="5"
-              markerWidth="8"
-              markerHeight="8"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb3ff" />
-            </marker>
           </defs>
 
           {treeEdges.map(({ from, to }) => {
-            const a = posOf(from);
-            const b = posOf(to);
-            const sx = a.x + NODE_W;
-            const sy = a.y + NODE_H / 2;
-            const ex = b.x;
-            const ey = b.y + NODE_H / 2;
-            const midX = sx + (ex - sx) / 2;
+            const pa = posOf(from);
+            const pb = posOf(to);
+            const { aSide, bSide } = pickSides(pa, pb);
             return (
               <path
                 key={`e-${from}-${to}`}
-                d={`M ${sx} ${sy} H ${midX} V ${ey} H ${ex}`}
+                d={routeEdge(pa, aSide, pb, bSide, arrowStyle)}
                 fill="none"
                 stroke="rgba(255,255,255,0.35)"
                 strokeWidth={2}
@@ -706,29 +805,32 @@ function TreeEditorInner({
             );
           })}
 
-          {links.map((l) => {
-            const a = anchor(posOf(l.from), l.fromSide);
-            const b = anchor(posOf(l.to), l.toSide);
-            const c1 = control(a, l.fromSide);
-            const c2 = control(b, l.toSide);
-            return (
-              <path
-                key={`l-${l.id}`}
-                d={`M ${a.x} ${a.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${b.x} ${b.y}`}
-                fill="none"
-                stroke="#8fb3ff"
-                strokeWidth={2.5}
-                markerEnd="url(#link-arrow)"
-                style={{ pointerEvents: readOnly ? "none" : "stroke", cursor: "pointer" }}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  if (!readOnly) {
-                    removeLink(l.id);
-                  }
-                }}
-              />
-            );
-          })}
+          {links.map((l) => (
+            <path
+              key={`l-${l.id}`}
+              d={routeEdge(
+                posOf(l.from),
+                l.fromSide,
+                posOf(l.to),
+                l.toSide,
+                arrowStyle
+              )}
+              fill="none"
+              stroke="rgba(255,255,255,0.35)"
+              strokeWidth={2}
+              markerEnd="url(#tree-arrow)"
+              style={{
+                pointerEvents: readOnly ? "none" : "stroke",
+                cursor: "pointer",
+              }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                if (!readOnly) {
+                  removeLink(l.id);
+                }
+              }}
+            />
+          ))}
 
           {linking && linkCursor && positions[linking.from] && (
             <path
@@ -738,10 +840,10 @@ function TreeEditorInner({
                 return `M ${a.x} ${a.y} C ${c1.x} ${c1.y} ${linkCursor.x} ${linkCursor.y} ${linkCursor.x} ${linkCursor.y}`;
               })()}
               fill="none"
-              stroke="#8fb3ff"
-              strokeWidth={2.5}
+              stroke="rgba(255,255,255,0.6)"
+              strokeWidth={2}
               strokeDasharray="6 4"
-              markerEnd="url(#link-arrow)"
+              markerEnd="url(#tree-arrow)"
             />
           )}
         </Edges>
@@ -898,6 +1000,17 @@ function TreeEditorInner({
             ⤢
           </Btn>
           <Divider />
+          <Btn
+            title={t("Arrow style")}
+            onClick={() =>
+              commit({
+                ...tree,
+                arrowStyle: arrowStyle === "elbow" ? "curved" : "elbow",
+              })
+            }
+          >
+            {arrowStyle === "elbow" ? "⌐" : "∿"}
+          </Btn>
           <ColorInput
             type="color"
             title={t("Background color")}
