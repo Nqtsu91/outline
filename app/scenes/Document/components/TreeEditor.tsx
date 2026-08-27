@@ -8,36 +8,46 @@ import { client } from "~/utils/ApiClient";
 import useStores from "~/hooks/useStores";
 
 /**
- * Project tree editor (MVP).
+ * Project tree editor.
  *
  * An infinite, dark canvas that renders one or more self-aligning trees of
- * rectangular nodes connected by elbow arrows. Each node has text, a status
- * that colors the rectangle, and an optional custom color. Whole trees can be
- * moved freely (Move tool). Supports pan/zoom, fit-to-view, undo/redo and
- * autosave.
+ * rectangular nodes connected by elbow arrows. Nodes carry text, a status color
+ * and an optional custom color. On top of the auto-layout:
+ *  - any node can be dragged freely (Move tool); it takes its own sub-tree with
+ *    it while its parent stays put, and connections stretch live.
+ *  - arbitrary links can be drawn between nodes via the four handles that appear
+ *    when hovering a node; multiple links may target the same node.
  *
- * Phase 2 (not yet implemented): drag a single branch to re-parent it with a
- * greyed preview and insertion onto connector arrows.
+ * Supports pan/zoom, fit-to-view, undo/redo and autosave.
  */
 
 type TreeStatus = "not_started" | "in_progress" | "to_validate" | "done";
+type Side = "top" | "bottom" | "left" | "right";
 
 type TreeNode = {
   id: string;
   text: string;
   emoji?: string;
   status: TreeStatus;
-  /** Custom color override; takes precedence over the status color. */
   color?: string;
   collapsed?: boolean;
   children: string[];
-  /** Manual position offset, only meaningful on root nodes (Move tool). */
+  /** Manual position offset; shifts the node and its whole sub-tree. */
   offset?: { x: number; y: number };
+};
+
+type TreeLink = {
+  id: string;
+  from: string;
+  fromSide: Side;
+  to: string;
+  toSide: Side;
 };
 
 type TreeData = {
   rootIds: string[];
   nodes: Record<string, TreeNode>;
+  links?: TreeLink[];
   bgColor?: string;
 };
 
@@ -50,7 +60,7 @@ const NODE_W = 190;
 const NODE_H = 56;
 const H_GAP = 72;
 const V_GAP = 18;
-const PADDING = 80;
+const PADDING = 120;
 const TREE_GAP = 2;
 const DEFAULT_BG = "#1b211f";
 
@@ -88,13 +98,11 @@ function newNode(): TreeNode {
 
 function defaultTree(): TreeData {
   const node = newNode();
-  return { rootIds: [node.id], nodes: { [node.id]: node } };
+  return { rootIds: [node.id], nodes: { [node.id]: node }, links: [] };
 }
 
 function normalize(data: unknown): TreeData | null {
   let raw: unknown = data;
-  // Some load paths may deliver canvasData as a JSON string rather than an
-  // object — accept both.
   if (typeof raw === "string") {
     try {
       raw = JSON.parse(raw);
@@ -106,70 +114,116 @@ function normalize(data: unknown): TreeData | null {
   if (!d || !d.nodes) {
     return null;
   }
+  const links = Array.isArray(d.links) ? d.links : [];
   if (Array.isArray(d.rootIds) && d.rootIds.length) {
-    return { rootIds: d.rootIds, nodes: d.nodes, bgColor: d.bgColor };
+    return { rootIds: d.rootIds, nodes: d.nodes, links, bgColor: d.bgColor };
   }
   if (d.rootId && d.nodes[d.rootId]) {
-    return { rootIds: [d.rootId], nodes: d.nodes, bgColor: d.bgColor };
+    return { rootIds: [d.rootId], nodes: d.nodes, links, bgColor: d.bgColor };
   }
   return null;
 }
 
-type Positions = Record<string, { x: number; y: number }>;
+type Point = { x: number; y: number };
+type Positions = Record<string, Point>;
 
-/** Tidy left-to-right layout; children share a column, trees stack (or are moved). */
+/** Anchor point on a given side of a node rectangle at `pos`. */
+function anchor(pos: Point, side: Side): Point {
+  switch (side) {
+    case "top":
+      return { x: pos.x + NODE_W / 2, y: pos.y };
+    case "bottom":
+      return { x: pos.x + NODE_W / 2, y: pos.y + NODE_H };
+    case "left":
+      return { x: pos.x, y: pos.y + NODE_H / 2 };
+    case "right":
+      return { x: pos.x + NODE_W, y: pos.y + NODE_H / 2 };
+  }
+}
+
+function control(a: Point, side: Side, dist = 60): Point {
+  switch (side) {
+    case "top":
+      return { x: a.x, y: a.y - dist };
+    case "bottom":
+      return { x: a.x, y: a.y + dist };
+    case "left":
+      return { x: a.x - dist, y: a.y };
+    case "right":
+      return { x: a.x + dist, y: a.y };
+  }
+}
+
+/**
+ * Two-pass layout: a tidy auto-layout, then per-node manual offsets applied
+ * cumulatively down the tree so moving a node carries its whole sub-tree.
+ */
 function computeLayout(tree: TreeData): {
   positions: Positions;
   width: number;
   height: number;
 } {
-  const raw: Positions = {};
+  const base: Positions = {};
   let leaf = 0;
 
-  const walk = (id: string, depth: number, ox: number, oy: number): number => {
+  const walk = (id: string, depth: number): number => {
     const node = tree.nodes[id];
     if (!node) {
       return 0;
     }
-    const x = ox + depth * (NODE_W + H_GAP);
+    const x = depth * (NODE_W + H_GAP);
     const kids = node.collapsed
       ? []
       : node.children.filter((c) => tree.nodes[c]);
-
     if (kids.length === 0) {
-      const y = oy + leaf * (NODE_H + V_GAP);
+      const y = leaf * (NODE_H + V_GAP);
       leaf++;
-      raw[id] = { x, y };
+      base[id] = { x, y };
       return y;
     }
-    const ys = kids.map((cid) => walk(cid, depth + 1, ox, oy));
+    const ys = kids.map((cid) => walk(cid, depth + 1));
     const y = (ys[0] + ys[ys.length - 1]) / 2;
-    raw[id] = { x, y };
+    base[id] = { x, y };
     return y;
   };
-
   tree.rootIds.forEach((rootId) => {
-    const root = tree.nodes[rootId];
-    if (!root) {
-      return;
+    if (tree.nodes[rootId]) {
+      walk(rootId, 0);
+      leaf += TREE_GAP;
     }
-    const off = root.offset ?? { x: 0, y: 0 };
-    walk(rootId, 0, off.x, off.y);
-    leaf += TREE_GAP;
   });
 
-  const xs = Object.values(raw).map((p) => p.x);
-  const ys = Object.values(raw).map((p) => p.y);
+  // Cumulative manual offsets.
+  const cum: Positions = {};
+  const walkCum = (id: string, px: number, py: number) => {
+    const off = tree.nodes[id]?.offset ?? { x: 0, y: 0 };
+    const x = px + off.x;
+    const y = py + off.y;
+    cum[id] = { x, y };
+    tree.nodes[id]?.children.forEach((c) => walkCum(c, x, y));
+  };
+  tree.rootIds.forEach((rootId) => walkCum(rootId, 0, 0));
+
+  const combined: Positions = {};
+  Object.keys(base).forEach((id) => {
+    combined[id] = {
+      x: base[id].x + (cum[id]?.x ?? 0),
+      y: base[id].y + (cum[id]?.y ?? 0),
+    };
+  });
+
+  const xs = Object.values(combined).map((p) => p.x);
+  const ys = Object.values(combined).map((p) => p.y);
   const minX = xs.length ? Math.min(...xs) : 0;
   const minY = ys.length ? Math.min(...ys) : 0;
   const maxX = xs.length ? Math.max(...xs) : 0;
   const maxY = ys.length ? Math.max(...ys) : 0;
 
   const positions: Positions = {};
-  Object.keys(raw).forEach((id) => {
+  Object.keys(combined).forEach((id) => {
     positions[id] = {
-      x: raw[id].x - minX + PADDING,
-      y: raw[id].y - minY + PADDING,
+      x: combined[id].x - minX + PADDING,
+      y: combined[id].y - minY + PADDING,
     };
   });
 
@@ -191,6 +245,7 @@ function TreeEditorInner({
   const [tree, setTree] = React.useState<TreeData>(initialTree);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [hoveredId, setHoveredId] = React.useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(
     null
   );
@@ -218,7 +273,6 @@ function TreeEditorInner({
     [documents, document.id]
   );
 
-  // Guarantee the last edit is saved when navigating away.
   React.useEffect(
     () => () => {
       if (persistTimer.current) {
@@ -323,13 +377,14 @@ function TreeEditorInner({
   const deleteNode = React.useCallback(
     (id: string) => {
       const ids = collectSubtree(id, []);
+      const idSet = new Set(ids);
       const nodes = { ...tree.nodes };
       ids.forEach((nid) => delete nodes[nid]);
       Object.keys(nodes).forEach((nid) => {
-        if (nodes[nid].children.includes(id)) {
+        if (nodes[nid].children.some((c) => idSet.has(c))) {
           nodes[nid] = {
             ...nodes[nid],
-            children: nodes[nid].children.filter((c) => c !== id),
+            children: nodes[nid].children.filter((c) => !idSet.has(c)),
           };
         }
       });
@@ -337,6 +392,9 @@ function TreeEditorInner({
         ...tree,
         rootIds: tree.rootIds.filter((r) => r !== id),
         nodes,
+        links: (tree.links ?? []).filter(
+          (l) => !idSet.has(l.from) && !idSet.has(l.to)
+        ),
       });
       setSelectedId(null);
       setEditingId(null);
@@ -360,26 +418,22 @@ function TreeEditorInner({
     [tree, deleteNode]
   );
 
-  // Map each node to its owning root, for the Move tool.
-  const nodeToRoot = React.useMemo(() => {
-    const map: Record<string, string> = {};
-    const assign = (id: string, root: string) => {
-      map[id] = root;
-      tree.nodes[id]?.children.forEach((c) => assign(c, root));
-    };
-    tree.rootIds.forEach((r) => assign(r, r));
-    return map;
-  }, [tree]);
+  const removeLink = React.useCallback(
+    (linkId: string) => {
+      commit({
+        ...tree,
+        links: (tree.links ?? []).filter((l) => l.id !== linkId),
+      });
+    },
+    [tree, commit]
+  );
 
   // ---- pan / zoom ----------------------------------------------------------
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [view, setView] = React.useState({ x: 40, y: 40, scale: 1 });
-  const [drag, setDrag] = React.useState<{
-    rootId: string;
-    dx: number;
-    dy: number;
-  } | null>(null);
+  const viewRef = React.useRef(view);
+  viewRef.current = view;
 
   const onBackgroundPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) {
@@ -430,41 +484,6 @@ function TreeEditorInner({
     () => computeLayout(tree),
     [tree]
   );
-  const scaleRef = React.useRef(view.scale);
-  scaleRef.current = view.scale;
-
-  const startTreeDrag = React.useCallback(
-    (id: string, e: React.PointerEvent) => {
-      const rootId = nodeToRoot[id];
-      const startX = e.clientX;
-      const startY = e.clientY;
-      const move = (ev: PointerEvent) => {
-        setDrag({
-          rootId,
-          dx: (ev.clientX - startX) / scaleRef.current,
-          dy: (ev.clientY - startY) / scaleRef.current,
-        });
-      };
-      const up = (ev: PointerEvent) => {
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        const dx = (ev.clientX - startX) / scaleRef.current;
-        const dy = (ev.clientY - startY) / scaleRef.current;
-        setDrag(null);
-        if (dx || dy) {
-          const root = tree.nodes[rootId];
-          const cur = root.offset ?? { x: 0, y: 0 };
-          updateNode(rootId, { offset: { x: cur.x + dx, y: cur.y + dy } });
-        }
-      };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
-    },
-    [nodeToRoot, tree, updateNode]
-  );
-
-  const contentW = width;
-  const contentH = height;
 
   const fitToView = React.useCallback(() => {
     const el = containerRef.current;
@@ -473,13 +492,105 @@ function TreeEditorInner({
     }
     const vw = el.clientWidth;
     const vh = el.clientHeight;
-    const scale = Math.min(vw / contentW, vh / contentH, 1) * 0.95;
+    const scale = Math.min(vw / width, vh / height, 1) * 0.95;
     setView({
-      x: (vw - contentW * scale) / 2,
-      y: (vh - contentH * scale) / 2,
+      x: (vw - width * scale) / 2,
+      y: (vh - height * scale) / 2,
       scale: Math.max(0.15, scale),
     });
-  }, [contentW, contentH]);
+  }, [width, height]);
+
+  // World coords from a screen event.
+  const toWorld = React.useCallback((clientX: number, clientY: number) => {
+    const el = containerRef.current;
+    const rect = el?.getBoundingClientRect();
+    const v = viewRef.current;
+    return {
+      x: ((clientX - (rect?.left ?? 0)) - v.x) / v.scale,
+      y: ((clientY - (rect?.top ?? 0)) - v.y) / v.scale,
+    };
+  }, []);
+
+  // ---- moving a node's sub-tree -------------------------------------------
+
+  const [drag, setDrag] = React.useState<{
+    subtree: Set<string>;
+    dx: number;
+    dy: number;
+  } | null>(null);
+
+  const startNodeDrag = React.useCallback(
+    (id: string, e: React.PointerEvent) => {
+      const subtree = new Set(collectSubtree(id, []));
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const move = (ev: PointerEvent) => {
+        setDrag({
+          subtree,
+          dx: (ev.clientX - startX) / viewRef.current.scale,
+          dy: (ev.clientY - startY) / viewRef.current.scale,
+        });
+      };
+      const up = (ev: PointerEvent) => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        const dx = (ev.clientX - startX) / viewRef.current.scale;
+        const dy = (ev.clientY - startY) / viewRef.current.scale;
+        setDrag(null);
+        if (dx || dy) {
+          const cur = tree.nodes[id].offset ?? { x: 0, y: 0 };
+          updateNode(id, { offset: { x: cur.x + dx, y: cur.y + dy } });
+        }
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    },
+    [collectSubtree, tree, updateNode]
+  );
+
+  // ---- creating a manual link ---------------------------------------------
+
+  const [linking, setLinking] = React.useState<{
+    from: string;
+    fromSide: Side;
+  } | null>(null);
+  const [linkCursor, setLinkCursor] = React.useState<Point | null>(null);
+
+  const startLink = React.useCallback(
+    (id: string, side: Side, e: React.PointerEvent) => {
+      e.stopPropagation();
+      setLinking({ from: id, fromSide: side });
+      setLinkCursor(toWorld(e.clientX, e.clientY));
+      const move = (ev: PointerEvent) => {
+        setLinkCursor(toWorld(ev.clientX, ev.clientY));
+      };
+      const up = (ev: PointerEvent) => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        const target = window.document
+          .elementFromPoint(ev.clientX, ev.clientY)
+          ?.closest("[data-handle]") as HTMLElement | null;
+        const toId = target?.getAttribute("data-node") ?? undefined;
+        const toSide = target?.getAttribute("data-side") as Side | undefined;
+        setLinking(null);
+        setLinkCursor(null);
+        if (toId && toSide && toId !== id) {
+          commit({
+            ...tree,
+            links: [
+              ...(tree.links ?? []),
+              { id: uid(), from: id, fromSide: side, to: toId, toSide },
+            ],
+          });
+        }
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    },
+    [toWorld, tree, commit]
+  );
+
+  // ---- keyboard: undo / redo ----------------------------------------------
 
   React.useEffect(() => {
     const el = containerRef.current;
@@ -508,16 +619,15 @@ function TreeEditorInner({
 
   const bg = tree.bgColor || DEFAULT_BG;
   const visibleIds = Object.keys(positions);
-
-  const posOf = (id: string) => {
+  const posOf = (id: string): Point => {
     const p = positions[id];
-    if (drag && nodeToRoot[id] === drag.rootId) {
+    if (drag && drag.subtree.has(id)) {
       return { x: p.x + drag.dx, y: p.y + drag.dy };
     }
     return p;
   };
 
-  const edges: Array<{ from: string; to: string }> = [];
+  const treeEdges: Array<{ from: string; to: string }> = [];
   visibleIds.forEach((id) => {
     const node = tree.nodes[id];
     if (!node || node.collapsed) {
@@ -525,10 +635,14 @@ function TreeEditorInner({
     }
     node.children.forEach((c) => {
       if (positions[c]) {
-        edges.push({ from: id, to: c });
+        treeEdges.push({ from: id, to: c });
       }
     });
   });
+
+  const links = (tree.links ?? []).filter(
+    (l) => positions[l.from] && positions[l.to]
+  );
 
   return (
     <Viewport
@@ -542,11 +656,11 @@ function TreeEditorInner({
       <World
         style={{
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
-          width: contentW,
-          height: contentH,
+          width,
+          height,
         }}
       >
-        <Edges width={contentW} height={contentH}>
+        <Edges width={width} height={height}>
           <defs>
             <marker
               id="tree-arrow"
@@ -559,8 +673,20 @@ function TreeEditorInner({
             >
               <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,0.5)" />
             </marker>
+            <marker
+              id="link-arrow"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="8"
+              markerHeight="8"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb3ff" />
+            </marker>
           </defs>
-          {edges.map(({ from, to }) => {
+
+          {treeEdges.map(({ from, to }) => {
             const a = posOf(from);
             const b = posOf(to);
             const sx = a.x + NODE_W;
@@ -570,7 +696,7 @@ function TreeEditorInner({
             const midX = sx + (ex - sx) / 2;
             return (
               <path
-                key={`${from}-${to}`}
+                key={`e-${from}-${to}`}
                 d={`M ${sx} ${sy} H ${midX} V ${ey} H ${ex}`}
                 fill="none"
                 stroke="rgba(255,255,255,0.35)"
@@ -579,6 +705,45 @@ function TreeEditorInner({
               />
             );
           })}
+
+          {links.map((l) => {
+            const a = anchor(posOf(l.from), l.fromSide);
+            const b = anchor(posOf(l.to), l.toSide);
+            const c1 = control(a, l.fromSide);
+            const c2 = control(b, l.toSide);
+            return (
+              <path
+                key={`l-${l.id}`}
+                d={`M ${a.x} ${a.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${b.x} ${b.y}`}
+                fill="none"
+                stroke="#8fb3ff"
+                strokeWidth={2.5}
+                markerEnd="url(#link-arrow)"
+                style={{ pointerEvents: readOnly ? "none" : "stroke", cursor: "pointer" }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  if (!readOnly) {
+                    removeLink(l.id);
+                  }
+                }}
+              />
+            );
+          })}
+
+          {linking && linkCursor && positions[linking.from] && (
+            <path
+              d={(() => {
+                const a = anchor(posOf(linking.from), linking.fromSide);
+                const c1 = control(a, linking.fromSide);
+                return `M ${a.x} ${a.y} C ${c1.x} ${c1.y} ${linkCursor.x} ${linkCursor.y} ${linkCursor.x} ${linkCursor.y}`;
+              })()}
+              fill="none"
+              stroke="#8fb3ff"
+              strokeWidth={2.5}
+              strokeDasharray="6 4"
+              markerEnd="url(#link-arrow)"
+            />
+          )}
         </Edges>
 
         {visibleIds.map((id) => {
@@ -586,51 +751,74 @@ function TreeEditorInner({
           const p = posOf(id);
           const isSelected = selectedId === id;
           const isEditing = editingId === id;
+          const showHandles =
+            !readOnly && !moveMode && (hoveredId === id || linking !== null);
           const hasChildren = node.children.length > 0;
           return (
-            <NodeBox
+            <NodePositioner
               key={id}
-              style={{
-                left: p.x,
-                top: p.y,
-                width: NODE_W,
-                height: NODE_H,
-                background: nodeColor(node),
-                outline: isSelected ? "2px solid #ffffff" : "none",
-              }}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                if (moveMode && !readOnly) {
-                  startTreeDrag(id, e);
-                } else {
-                  setSelectedId(id);
-                }
-              }}
-              onDoubleClick={() => !readOnly && !moveMode && setEditingId(id)}
+              style={{ left: p.x, top: p.y }}
+              onMouseEnter={() => setHoveredId(id)}
+              onMouseLeave={() =>
+                setHoveredId((cur) => (cur === id ? null : cur))
+              }
             >
-              {node.emoji ? <Emoji>{node.emoji}</Emoji> : null}
-              {isEditing ? (
-                <NodeInput
-                  autoFocus
-                  defaultValue={node.text}
-                  onBlur={(e) => {
-                    updateNode(id, { text: e.target.value });
-                    setEditingId(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      (e.target as HTMLInputElement).blur();
-                    }
-                    if (e.key === "Escape") {
+              <NodeBox
+                style={{
+                  width: NODE_W,
+                  height: NODE_H,
+                  background: nodeColor(node),
+                  outline: isSelected ? "2px solid #ffffff" : "none",
+                }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  if (moveMode && !readOnly) {
+                    startNodeDrag(id, e);
+                  } else {
+                    setSelectedId(id);
+                  }
+                }}
+                onDoubleClick={() =>
+                  !readOnly && !moveMode && setEditingId(id)
+                }
+              >
+                {node.emoji ? <Emoji>{node.emoji}</Emoji> : null}
+                {isEditing ? (
+                  <NodeInput
+                    autoFocus
+                    defaultValue={node.text}
+                    onBlur={(e) => {
+                      updateNode(id, { text: e.target.value });
                       setEditingId(null);
-                    }
-                    e.stopPropagation();
-                  }}
-                  onPointerDown={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <NodeText>{node.text || t("Untitled")}</NodeText>
-              )}
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        (e.target as HTMLInputElement).blur();
+                      }
+                      if (e.key === "Escape") {
+                        setEditingId(null);
+                      }
+                      e.stopPropagation();
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <NodeText>{node.text || t("Untitled")}</NodeText>
+                )}
+              </NodeBox>
+
+              {showHandles &&
+                (["top", "bottom", "left", "right"] as Side[]).map((side) => (
+                  <Handle
+                    key={side}
+                    data-handle="true"
+                    data-node={id}
+                    data-side={side}
+                    $side={side}
+                    title={t("Drag to link")}
+                    onPointerDown={(e) => startLink(id, side, e)}
+                  />
+                ))}
 
               {isSelected && !readOnly && !moveMode && (
                 <Toolbar onPointerDown={(e) => e.stopPropagation()}>
@@ -680,7 +868,7 @@ function TreeEditorInner({
                   </Btn>
                 </Toolbar>
               )}
-            </NodeBox>
+            </NodePositioner>
           );
         })}
       </World>
@@ -690,9 +878,7 @@ function TreeEditorInner({
           <Btn
             title={t("Move tool")}
             style={
-              moveMode
-                ? { background: "rgba(120,160,255,0.5)" }
-                : undefined
+              moveMode ? { background: "rgba(120,160,255,0.5)" } : undefined
             }
             onClick={() => setMoveMode((m) => !m)}
           >
@@ -743,10 +929,9 @@ function TreeEditorInner({
 }
 
 /**
- * Wrapper that forces a fresh document fetch before mounting the editor, so the
- * tree is always initialized from the latest saved data rather than a stale
- * cached model (the sidebar keeps documents cached, so opening one otherwise
- * skips the network fetch and its canvasData).
+ * Wrapper that loads the scene straight from the server before mounting the
+ * editor, so it always initializes from the latest saved data rather than a
+ * stale cached model.
  */
 function TreeEditor({ document, readOnly }: Props) {
   const [initialTree, setInitialTree] = React.useState<TreeData | undefined>(
@@ -818,8 +1003,12 @@ const Edges = styled.svg`
   overflow: visible;
 `;
 
-const NodeBox = styled.div`
+const NodePositioner = styled.div`
   position: absolute;
+`;
+
+const NodeBox = styled.div`
+  position: relative;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   display: flex;
@@ -829,6 +1018,32 @@ const NodeBox = styled.div`
   cursor: pointer;
   color: #ffffff;
   font-weight: 600;
+`;
+
+const Handle = styled.div<{ $side: Side }>`
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #8fb3ff;
+  border: 2px solid #1b211f;
+  cursor: crosshair;
+  z-index: 2;
+  ${(p) =>
+    p.$side === "top" &&
+    "top: -9px; left: 50%; transform: translateX(-50%);"}
+  ${(p) =>
+    p.$side === "bottom" &&
+    "bottom: -9px; left: 50%; transform: translateX(-50%);"}
+  ${(p) =>
+    p.$side === "left" && "left: -9px; top: 50%; transform: translateY(-50%);"}
+  ${(p) =>
+    p.$side === "right" &&
+    "right: -9px; top: 50%; transform: translateY(-50%);"}
+
+  &:hover {
+    background: #ffffff;
+  }
 `;
 
 const Emoji = styled.span`
@@ -865,6 +1080,7 @@ const Toolbar = styled.div`
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  z-index: 3;
 `;
 
 const StatusRow = styled.div`
