@@ -12,12 +12,23 @@ import useStores from "~/hooks/useStores";
  *
  * An infinite, dark canvas that renders one or more self-aligning trees of
  * rectangular nodes connected by arrows (global elbow/curved style). Nodes
- * carry text, a status color and an optional custom color. Controls:
- *  - left-drag on a node moves it alone (its children stay put);
+ * carry text, a status color and an optional custom color.
+ *
+ * Layout is automatic by default: every node has an automatic slot (one
+ * column right of its parent, stacked with its siblings). Dragging a node
+ * pins it with a manual displacement; pinned nodes show a badge that returns
+ * them to their automatic slot, and "Tidy branch" / "Tidy all" clear pins in
+ * bulk. Nothing ever moves without an explicit gesture.
+ *
+ * Controls:
+ *  - left-drag on a node moves it alone (its children block stays put);
  *  - Shift+left-drag moves the node with its sub-tree and manual-link targets;
+ *  - while dragging, the node snaps to other nodes' columns/rows and to its
+ *    own automatic slot (guides are drawn); hold Alt or Ctrl to disable
+ *    snapping, press Escape to cancel the drag;
  *  - right-drag (or left-drag on the background) pans the camera;
  *  - hovering a node shows four handles to draw manual links; multiple links
- *    may target the same node, and clicking a link removes it.
+ *    may target the same node, and clicking a link opens a delete menu.
  *
  * Supports pan/zoom, fit-to-view, undo/redo and autosave. Connections stretch
  * live while dragging.
@@ -34,8 +45,17 @@ type TreeNode = {
   color?: string;
   collapsed?: boolean;
   children: string[];
-  /** Manual position offset; shifts the node and its whole sub-tree. */
+  /**
+   * Manual pin: displacement from the automatic slot, relative to the parent.
+   * Absent = fully driven by the automatic layout.
+   */
   offset?: { x: number; y: number };
+  /**
+   * Displacement of this node's whole block of children relative to the node.
+   * Set when the node is moved alone so its children stay put while remaining
+   * automatic among themselves (new children keep stacking with them).
+   */
+  childrenOffset?: { x: number; y: number };
 };
 
 type TreeLink = {
@@ -66,6 +86,13 @@ const H_GAP = 72;
 const V_GAP = 18;
 const TREE_GAP = 2;
 const DEFAULT_BG = "#1b211f";
+/** Snap distance while dragging, in screen pixels (independent of zoom). */
+const SNAP_PX = 8;
+/** Larger, two-axis snap radius for the node's own automatic slot. */
+const SNAP_AUTO_PX = 14;
+/** Minimum gap between two nodes for an edge to use their facing sides. */
+const ARROW_CLEARANCE = 48;
+const GUIDE_COLOR = "#8fb3ff";
 
 const STATUSES: Record<TreeStatus, { labelKey: string; color: string }> = {
   not_started: { labelKey: "Not started", color: "#6b7280" },
@@ -99,6 +126,51 @@ function newNode(): TreeNode {
   };
 }
 
+type PinField = "offset" | "childrenOffset";
+
+/**
+ * Returns a copy of `node` with the given manual displacement shifted by
+ * (dx, dy). A displacement that lands back on zero is dropped entirely, so
+ * the node is once again fully driven by the automatic layout.
+ */
+function shiftField(
+  node: TreeNode,
+  field: PinField,
+  dx: number,
+  dy: number
+): TreeNode {
+  const cur = node[field] ?? { x: 0, y: 0 };
+  const x = Math.round((cur.x + dx) * 100) / 100;
+  const y = Math.round((cur.y + dy) * 100) / 100;
+  const { [field]: _dropped, ...rest } = node;
+  if (Math.abs(x) < 0.5 && Math.abs(y) < 0.5) {
+    return rest;
+  }
+  return { ...rest, [field]: { x, y } };
+}
+
+const shiftOffset = (node: TreeNode, dx: number, dy: number) =>
+  shiftField(node, "offset", dx, dy);
+
+/** A displacement counts only above the same threshold `shiftField` drops at. */
+const live = (o?: Point) =>
+  !!o && (Math.abs(o.x) >= 0.5 || Math.abs(o.y) >= 0.5);
+
+const isPinned = (node: TreeNode) =>
+  live(node.offset) || live(node.childrenOffset);
+
+/** Drops every manual displacement so the node is laid out automatically. */
+function unpin(node: TreeNode): TreeNode {
+  const { offset: _o, childrenOffset: _c, ...rest } = node;
+  return rest;
+}
+
+/** Returns a copy of `node` whose children block is laid out automatically. */
+function unpinChildren(node: TreeNode): TreeNode {
+  const { childrenOffset: _c, ...rest } = node;
+  return rest;
+}
+
 function defaultTree(): TreeData {
   const node = newNode();
   return { rootIds: [node.id], nodes: { [node.id]: node }, links: [] };
@@ -118,10 +190,11 @@ function normalize(data: unknown): TreeData | null {
     return null;
   }
   const links = Array.isArray(d.links) ? d.links : [];
+  const nodes = migrateNodes(d.nodes);
   if (Array.isArray(d.rootIds) && d.rootIds.length) {
     return {
       rootIds: d.rootIds,
-      nodes: d.nodes,
+      nodes,
       links,
       bgColor: d.bgColor,
       arrowStyle: d.arrowStyle,
@@ -130,13 +203,66 @@ function normalize(data: unknown): TreeData | null {
   if (d.rootId && d.nodes[d.rootId]) {
     return {
       rootIds: [d.rootId],
-      nodes: d.nodes,
+      nodes,
       links,
       bgColor: d.bgColor,
       arrowStyle: d.arrowStyle,
     };
   }
   return null;
+}
+
+/**
+ * Upgrades node data written by earlier versions without changing a single
+ * rendered position:
+ *  - zero-length displacements (which were never dropped before) are removed,
+ *    so they no longer count as manual pins;
+ *  - the old "move alone" encoding, where every child carried the same
+ *    compensating offset, becomes one `childrenOffset` on the parent. The
+ *    children are automatic again, so the badge, "Tidy branch" and new
+ *    siblings behave exactly as for data written by the current code.
+ */
+function migrateNodes(
+  input: Record<string, TreeNode>
+): Record<string, TreeNode> {
+  const nodes: Record<string, TreeNode> = {};
+  Object.keys(input).forEach((id) => {
+    let n = input[id];
+    if (n.offset && !live(n.offset)) {
+      const { offset: _o, ...rest } = n;
+      n = rest;
+    }
+    if (n.childrenOffset && !live(n.childrenOffset)) {
+      n = unpinChildren(n);
+    }
+    nodes[id] = n;
+  });
+  Object.keys(nodes).forEach((id) => {
+    const n = nodes[id];
+    if (n.childrenOffset) {
+      return;
+    }
+    const kids = n.children.map((c) => nodes[c]).filter(Boolean);
+    const first = kids[0]?.offset;
+    if (!kids.length || !first || !live(first)) {
+      return;
+    }
+    const same = kids.every(
+      (k) =>
+        k.offset &&
+        Math.abs(k.offset.x - first.x) < 0.01 &&
+        Math.abs(k.offset.y - first.y) < 0.01
+    );
+    if (!same) {
+      return;
+    }
+    nodes[id] = { ...n, childrenOffset: { x: first.x, y: first.y } };
+    kids.forEach((k) => {
+      const { offset: _o, ...rest } = k;
+      nodes[k.id] = rest;
+    });
+  });
+  return nodes;
 }
 
 type Point = { x: number; y: number };
@@ -177,11 +303,26 @@ const centerOf = (p: Point): Point => ({
 const isHorizontal = (s: Side) => s === "left" || s === "right";
 
 /**
- * Picks the pair of node sides an edge should connect, based on the relative
- * position of the two nodes, so the arrow always enters the target from an
- * outer face and its head is never hidden behind the node.
+ * Picks the pair of node sides an edge should connect. Whenever there is
+ * enough horizontal clearance the edge leaves the source's right side and
+ * enters the target's left side, so tree edges always read as a right-facing
+ * bracket even for children placed far below; otherwise the dominant axis
+ * decides, so the arrow always enters from an outer face and its head is
+ * never hidden behind the node.
  */
 function pickSides(a: Point, b: Point): { aSide: Side; bSide: Side } {
+  if (b.x - (a.x + NODE_W) >= ARROW_CLEARANCE) {
+    return { aSide: "right", bSide: "left" };
+  }
+  if (a.x - (b.x + NODE_W) >= ARROW_CLEARANCE) {
+    return { aSide: "left", bSide: "right" };
+  }
+  if (b.y - (a.y + NODE_H) >= ARROW_CLEARANCE) {
+    return { aSide: "bottom", bSide: "top" };
+  }
+  if (a.y - (b.y + NODE_H) >= ARROW_CLEARANCE) {
+    return { aSide: "top", bSide: "bottom" };
+  }
   const ca = centerOf(a);
   const cb = centerOf(b);
   const dx = cb.x - ca.x;
@@ -264,6 +405,36 @@ function routeEdge(
   return `M ${a.x} ${a.y} L ${ea.x} ${ea.y} ${mid} L ${eb.x} ${eb.y} L ${b.x} ${b.y}`;
 }
 
+type SnapCandidate = {
+  /** Value the dragged node's left/top should take to snap. */
+  v: number;
+  /** Rectangle origin of the node that produced this candidate. */
+  src: Point;
+  /** True for the node's own automatic (tidy) slot. */
+  tidy?: boolean;
+};
+
+/**
+ * Picks the closest candidate within `threshold`, preferring the automatic
+ * slot on ties so dragging a node back home re-engages the auto layout.
+ */
+function snapAxis(
+  value: number,
+  cands: SnapCandidate[],
+  threshold: number
+): SnapCandidate | null {
+  let best: SnapCandidate | null = null;
+  let bestD = threshold;
+  for (const c of cands) {
+    const d = Math.abs(c.v - value);
+    if (d < bestD || (d === bestD && c.tidy && best && !best.tidy)) {
+      best = c;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
 /**
  * Two-pass layout: a tidy auto-layout, then per-node manual offsets applied
  * cumulatively down the tree so moving a node carries its whole sub-tree.
@@ -304,14 +475,17 @@ function computeLayout(tree: TreeData): {
     }
   });
 
-  // Cumulative manual offsets.
+  // Cumulative manual displacements: a node's pin, plus the displacement of
+  // its parent's children block.
   const cum: Positions = {};
   const walkCum = (id: string, px: number, py: number) => {
-    const off = tree.nodes[id]?.offset ?? { x: 0, y: 0 };
+    const node = tree.nodes[id];
+    const off = node?.offset ?? { x: 0, y: 0 };
+    const co = node?.childrenOffset ?? { x: 0, y: 0 };
     const x = px + off.x;
     const y = py + off.y;
     cum[id] = { x, y };
-    tree.nodes[id]?.children.forEach((c) => walkCum(c, x, y));
+    node?.children.forEach((c) => walkCum(c, x + co.x, y + co.y));
   };
   tree.rootIds.forEach((rootId) => walkCum(rootId, 0, 0));
 
@@ -354,6 +528,11 @@ function TreeEditorInner({
 
   const history = React.useRef<TreeData[]>([tree]);
   const historyIndex = React.useRef(0);
+  // Latest tree for long-lived pointer handlers, which must not commit from
+  // the snapshot they closed over at pointer-down (a text blur or an undo
+  // can land mid-drag).
+  const treeRef = React.useRef(tree);
+  treeRef.current = tree;
 
   const persistTimer = React.useRef<ReturnType<typeof setTimeout>>();
   const pendingSaveRef = React.useRef<TreeData | null>(null);
@@ -437,13 +616,16 @@ function TreeEditorInner({
         return;
       }
       const child = newNode();
+      // A first child always lands in its automatic slot beside the parent:
+      // a stale children-block displacement must not apply to it.
+      const base = parent.children.length ? parent : unpinChildren(parent);
       commit({
         ...tree,
         nodes: {
           ...tree.nodes,
           [child.id]: child,
           [parentId]: {
-            ...parent,
+            ...base,
             collapsed: false,
             children: [...parent.children, child.id],
           },
@@ -483,10 +665,14 @@ function TreeEditorInner({
       ids.forEach((nid) => delete nodes[nid]);
       Object.keys(nodes).forEach((nid) => {
         if (nodes[nid].children.some((c) => idSet.has(c))) {
-          nodes[nid] = {
-            ...nodes[nid],
-            children: nodes[nid].children.filter((c) => !idSet.has(c)),
-          };
+          const remaining = nodes[nid].children.filter((c) => !idSet.has(c));
+          // A children-block displacement has nothing left to displace once
+          // the last child is gone; drop it so the next child lands beside
+          // its parent rather than where the old block used to be.
+          const parent = remaining.length
+            ? nodes[nid]
+            : unpinChildren(nodes[nid]);
+          nodes[nid] = { ...parent, children: remaining };
         }
       });
       commit({
@@ -528,6 +714,77 @@ function TreeEditorInner({
     },
     [tree, commit]
   );
+
+  // ---- automatic layout: returning pinned nodes to their slots ------------
+
+  /** Tree where `id` and its children block are laid out automatically. */
+  const autoPlacedTree = React.useCallback(
+    (id: string): TreeData | null => {
+      const node = tree.nodes[id];
+      if (!node || !isPinned(node)) {
+        return null;
+      }
+      return { ...tree, nodes: { ...tree.nodes, [id]: unpin(node) } };
+    },
+    [tree]
+  );
+
+  /**
+   * Tree where every descendant of `id` is laid out automatically under it.
+   * The node itself keeps its own pin so it does not move.
+   */
+  const tidiedBranchTree = React.useCallback(
+    (id: string): TreeData | null => {
+      const node = tree.nodes[id];
+      if (!node) {
+        return null;
+      }
+      const nodes = { ...tree.nodes, [id]: unpinChildren(node) };
+      let changed = !!node.childrenOffset;
+      collectSubtree(id, []).forEach((nid) => {
+        if (nid !== id && nodes[nid] && isPinned(nodes[nid])) {
+          nodes[nid] = unpin(nodes[nid]);
+          changed = true;
+        }
+      });
+      return changed ? { ...tree, nodes } : null;
+    },
+    [tree, collectSubtree]
+  );
+
+  /** Tree where every node is laid out automatically. */
+  const tidiedAllTree = React.useMemo((): TreeData | null => {
+    const nodes: Record<string, TreeNode> = {};
+    let changed = false;
+    Object.values(tree.nodes).forEach((n) => {
+      if (isPinned(n)) {
+        changed = true;
+      }
+      nodes[n.id] = unpin(n);
+    });
+    return changed ? { ...tree, nodes } : null;
+  }, [tree]);
+
+  const pendingFitRef = React.useRef(false);
+
+  // Hovering a tidy action previews the layout it would produce (ghost
+  // rectangles at every node that would move), so the user sees what the
+  // explicit click will do before anything moves.
+  const [previewTree, setPreviewTree] = React.useState<TreeData | null>(null);
+  const previewPositions = React.useMemo(
+    () => (previewTree ? computeLayout(previewTree).positions : null),
+    [previewTree]
+  );
+  // A preview is derived from the tree it was computed for; drop it as soon
+  // as the tree changes underneath (undo, autosave race) so no stale ghosts
+  // linger until the pointer leaves the control.
+  React.useEffect(() => {
+    setPreviewTree(null);
+  }, [tree]);
+
+  const [snapEnabled, setSnapEnabled] = React.useState(true);
+  const snapEnabledRef = React.useRef(snapEnabled);
+  snapEnabledRef.current = snapEnabled;
 
   // ---- pan / zoom ----------------------------------------------------------
 
@@ -633,6 +890,15 @@ function TreeEditorInner({
     }
   }, [fitToView]);
 
+  // "Tidy all" is the one tidy action allowed to move the camera: it refits
+  // once the new layout is known.
+  React.useEffect(() => {
+    if (pendingFitRef.current) {
+      pendingFitRef.current = false;
+      fitToView();
+    }
+  }, [tree, fitToView]);
+
   // When a node enters edit mode (e.g. it was just created off-screen, like a
   // new tree stacked below the others), pan the camera just enough to reveal
   // it — the nodes themselves never move.
@@ -685,6 +951,14 @@ function TreeEditorInner({
     subtree: Set<string>;
     dx: number;
     dy: number;
+    /** Vertical alignment guide (world coords) when snapped on X. */
+    guideX?: { x: number; y1: number; y2: number };
+    /** Horizontal alignment guide (world coords) when snapped on Y. */
+    guideY?: { y: number; x1: number; x2: number };
+    /** Where the dragged node would sit under the automatic layout. */
+    tidySlot?: Point;
+    /** True while the node is snapped onto its automatic slot. */
+    atAuto?: boolean;
   } | null>(null);
 
   // Map each node to its tree-parent (children arrays only).
@@ -740,75 +1014,200 @@ function TreeEditorInner({
         moved.add(id);
       }
 
+      const origin = positions[id];
+      if (!origin) {
+        return;
+      }
       const startX = e.clientX;
       const startY = e.clientY;
-      let dragging = false;
-      const move = (ev: PointerEvent) => {
-        const dxs = ev.clientX - startX;
-        const dys = ev.clientY - startY;
-        if (!dragging && Math.hypot(dxs, dys) > 4) {
-          dragging = true;
-        }
-        if (dragging) {
-          setDrag({
-            subtree: moved,
-            dx: dxs / viewRef.current.scale,
-            dy: dys / viewRef.current.scale,
-          });
+      // Deltas are measured in world units so panning or zooming mid-drag
+      // never desynchronises the node from the pointer.
+      const startWorld = toWorld(startX, startY);
+
+      // Snap candidates are built once: every node that stays put offers its
+      // column (left edge), the "child column" to its right and the "parent
+      // column" to its left, plus its row and the rows directly above/below
+      // it at the standard stacking gap. The node's own automatic slot (where
+      // the tidy layout would put it) is offered too, so dragging it back
+      // near home snaps it exactly onto the auto layout.
+      const candX: SnapCandidate[] = [];
+      const candY: SnapCandidate[] = [];
+      const seenX = new Set<number>();
+      const seenY = new Set<number>();
+      const pushX = (c: SnapCandidate) => {
+        const k = Math.round(c.v * 2);
+        if (!seenX.has(k)) {
+          seenX.add(k);
+          candX.push(c);
         }
       };
-      const up = (ev: PointerEvent) => {
+      const pushY = (c: SnapCandidate) => {
+        const k = Math.round(c.v * 2);
+        if (!seenY.has(k)) {
+          seenY.add(k);
+          candY.push(c);
+        }
+      };
+      const own = tree.nodes[id].offset ?? { x: 0, y: 0 };
+      const parentId = parentOf[id];
+      const tidySlot =
+        parentId && moved.has(parentId)
+          ? undefined
+          : { x: origin.x - own.x, y: origin.y - own.y };
+      if (tidySlot) {
+        const src = parentId ? positions[parentId] ?? tidySlot : tidySlot;
+        pushX({ v: tidySlot.x, src, tidy: true });
+        pushY({ v: tidySlot.y, src, tidy: true });
+      }
+      const stationary: Point[] = [];
+      Object.keys(positions).forEach((nid) => {
+        if (moved.has(nid)) {
+          return;
+        }
+        const p = positions[nid];
+        stationary.push(p);
+        pushX({ v: p.x, src: p });
+        pushX({ v: p.x + NODE_W + H_GAP, src: p });
+        pushX({ v: p.x - NODE_W - H_GAP, src: p });
+        pushY({ v: p.y, src: p });
+        pushY({ v: p.y + NODE_H + V_GAP, src: p });
+        pushY({ v: p.y - NODE_H - V_GAP, src: p });
+      });
+      const overlaps = (x: number, y: number) =>
+        stationary.some((p) => Math.abs(p.x - x) < 1 && Math.abs(p.y - y) < 1);
+
+      let dragging = false;
+      // Last applied (possibly snapped) delta, reused on release.
+      let last = { dx: 0, dy: 0 };
+      const cleanup = () => {
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", up);
+        window.removeEventListener("keydown", onKey);
         setDrag(null);
+      };
+      const move = (ev: PointerEvent) => {
+        if (
+          !dragging &&
+          Math.hypot(ev.clientX - startX, ev.clientY - startY) > 4
+        ) {
+          dragging = true;
+        }
         if (!dragging) {
           return;
         }
-        const dx = (ev.clientX - startX) / viewRef.current.scale;
-        const dy = (ev.clientY - startY) / viewRef.current.scale;
+        const scale = viewRef.current.scale;
+        const cur = toWorld(ev.clientX, ev.clientY);
+        let dx = cur.x - startWorld.x;
+        let dy = cur.y - startWorld.y;
+        let guideX: { x: number; y1: number; y2: number } | undefined;
+        let guideY: { y: number; x1: number; x2: number } | undefined;
+        let atAuto = false;
+        // Alt or Ctrl held during the drag disables snapping for free placement.
+        const snapping =
+          snapEnabledRef.current && !ev.altKey && !ev.ctrlKey && !ev.metaKey;
+        if (snapping) {
+          const tx = origin.x + dx;
+          const ty = origin.y + dy;
+          const tolAuto = SNAP_AUTO_PX / scale;
+          if (
+            tidySlot &&
+            Math.abs(tx - tidySlot.x) <= tolAuto &&
+            Math.abs(ty - tidySlot.y) <= tolAuto
+          ) {
+            // Two-axis capture by the automatic slot.
+            dx = tidySlot.x - origin.x;
+            dy = tidySlot.y - origin.y;
+            atAuto = true;
+          } else {
+            const thr = SNAP_PX / scale;
+            let sx = snapAxis(tx, candX, thr);
+            let sy = snapAxis(ty, candY, thr);
+            // Never snap exactly on top of another node: release the axis
+            // that had to travel further to get there.
+            if (sx && sy && overlaps(sx.v, sy.v)) {
+              if (Math.abs(sx.v - tx) > Math.abs(sy.v - ty)) {
+                sx = null;
+              } else {
+                sy = null;
+              }
+            }
+            if (sx) {
+              dx = sx.v - origin.x;
+            }
+            if (sy) {
+              dy = sy.v - origin.y;
+            }
+            const nx = origin.x + dx;
+            const ny = origin.y + dy;
+            if (sx) {
+              guideX = {
+                x: sx.v,
+                y1: Math.min(sx.src.y, ny) - 24,
+                y2: Math.max(sx.src.y + NODE_H, ny + NODE_H) + 24,
+              };
+            }
+            if (sy) {
+              guideY = {
+                y: sy.v,
+                x1: Math.min(sy.src.x, nx) - 24,
+                x2: Math.max(sy.src.x + NODE_W, nx + NODE_W) + 24,
+              };
+            }
+          }
+        }
+        last = { dx, dy };
+        setDrag({ subtree: moved, dx, dy, guideX, guideY, tidySlot, atAuto });
+      };
+      const up = () => {
+        cleanup();
+        if (!dragging) {
+          return;
+        }
+        const { dx, dy } = last;
         if (!dx && !dy) {
           return;
         }
-        const nodes = { ...tree.nodes };
+        // Apply the move on top of whatever the tree is NOW, so a commit that
+        // landed during the drag (text blur, undo) is preserved. The moved
+        // set was computed at pointer-down, hence the existence guards.
+        const base = treeRef.current;
+        const nodes = { ...base.nodes };
         if (withSubtree) {
           // Offset every "root" of the moved region — nodes whose tree-parent
           // did not move. Their descendants follow via the cumulative layout.
           moved.forEach((nid) => {
             const parent = parentOf[nid];
-            if (parent && moved.has(parent)) {
+            if (!nodes[nid] || (parent && moved.has(parent))) {
               return;
             }
-            const cur = nodes[nid].offset ?? { x: 0, y: 0 };
-            nodes[nid] = {
-              ...nodes[nid],
-              offset: { x: cur.x + dx, y: cur.y + dy },
-            };
+            nodes[nid] = shiftOffset(nodes[nid], dx, dy);
           });
+        } else if (nodes[id]) {
+          // Move the node alone: pin it, and displace its children block the
+          // opposite way so the children stay exactly where they were while
+          // remaining automatic among themselves. Hidden (collapsed) children
+          // follow the node instead, so they are never left behind unseen.
+          nodes[id] = shiftOffset(nodes[id], dx, dy);
+          if (nodes[id].children.length && !nodes[id].collapsed) {
+            nodes[id] = shiftField(nodes[id], "childrenOffset", -dx, -dy);
+          }
         } else {
-          // Move the node alone: shift it, and compensate its direct children
-          // so they stay exactly where they were.
-          const cur = nodes[id].offset ?? { x: 0, y: 0 };
-          nodes[id] = {
-            ...nodes[id],
-            offset: { x: cur.x + dx, y: cur.y + dy },
-          };
-          nodes[id].children.forEach((c) => {
-            if (!nodes[c]) {
-              return;
-            }
-            const co = nodes[c].offset ?? { x: 0, y: 0 };
-            nodes[c] = {
-              ...nodes[c],
-              offset: { x: co.x - dx, y: co.y - dy },
-            };
-          });
+          return;
         }
-        commit({ ...tree, nodes });
+        commit({ ...base, nodes });
+      };
+      const onKey = (ev: KeyboardEvent) => {
+        // Escape abandons the drag without committing anything.
+        if (ev.key === "Escape") {
+          dragging = false;
+          cleanup();
+        }
       };
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up);
+      window.addEventListener("keydown", onKey);
     },
-    [tree, parentOf, commit, readOnly]
+    [tree, positions, parentOf, commit, readOnly, toWorld]
   );
 
   // ---- creating a manual link ---------------------------------------------
@@ -894,6 +1293,10 @@ function TreeEditorInner({
 
   const bg = tree.bgColor || DEFAULT_BG;
   const arrowStyle: "elbow" | "curved" = tree.arrowStyle ?? "elbow";
+  // The whole world is zoomed with a CSS transform, which SVG's
+  // non-scaling-stroke cannot undo; overlay strokes are divided by the zoom
+  // so guides keep a constant on-screen thickness.
+  const k = 1 / view.scale;
   const visibleIds = Object.keys(positions);
   const posOf = (id: string): Point => {
     const p = positions[id];
@@ -1012,6 +1415,82 @@ function TreeEditorInner({
             );
           })}
 
+          {/* Ghost of the dragged node's automatic slot; fills when captured. */}
+          {drag?.tidySlot && (
+            <rect
+              x={drag.tidySlot.x}
+              y={drag.tidySlot.y}
+              width={NODE_W}
+              height={NODE_H}
+              rx={8}
+              fill={GUIDE_COLOR}
+              fillOpacity={drag.atAuto ? 0.18 : 0}
+              stroke={GUIDE_COLOR}
+              strokeOpacity={drag.atAuto ? 0.9 : 0.45}
+              strokeWidth={(drag.atAuto ? 2 : 1.5) * k}
+              strokeDasharray={`${6 * k} ${4 * k}`}
+            />
+          )}
+          {/* Alignment guides: a dark halo under a dashed line so they read on
+              any background colour. */}
+          {drag?.guideX &&
+            [
+              { stroke: "rgba(0,0,0,0.35)", w: 3, dashed: false },
+              { stroke: GUIDE_COLOR, w: 1.5, dashed: true },
+            ].map((s, i) => (
+              <line
+                key={`gx-${i}`}
+                x1={drag.guideX!.x}
+                y1={drag.guideX!.y1}
+                x2={drag.guideX!.x}
+                y2={drag.guideX!.y2}
+                stroke={s.stroke}
+                strokeWidth={s.w * k}
+                strokeDasharray={s.dashed ? `${4 * k} ${4 * k}` : undefined}
+              />
+            ))}
+          {drag?.guideY &&
+            [
+              { stroke: "rgba(0,0,0,0.35)", w: 3, dashed: false },
+              { stroke: GUIDE_COLOR, w: 1.5, dashed: true },
+            ].map((s, i) => (
+              <line
+                key={`gy-${i}`}
+                x1={drag.guideY!.x1}
+                y1={drag.guideY!.y}
+                x2={drag.guideY!.x2}
+                y2={drag.guideY!.y}
+                stroke={s.stroke}
+                strokeWidth={s.w * k}
+                strokeDasharray={s.dashed ? `${4 * k} ${4 * k}` : undefined}
+              />
+            ))}
+          {/* Preview of a hovered tidy action: where each node would move. */}
+          {previewPositions &&
+            Object.keys(previewPositions).map((nid) => {
+              const from = positions[nid];
+              const to = previewPositions[nid];
+              if (!from || Math.hypot(to.x - from.x, to.y - from.y) < 1) {
+                return null;
+              }
+              return (
+                <rect
+                  key={`pv-${nid}`}
+                  x={to.x}
+                  y={to.y}
+                  width={NODE_W}
+                  height={NODE_H}
+                  rx={8}
+                  fill={GUIDE_COLOR}
+                  fillOpacity={0.1}
+                  stroke={GUIDE_COLOR}
+                  strokeOpacity={0.6}
+                  strokeWidth={1.5 * k}
+                  strokeDasharray={`${6 * k} ${4 * k}`}
+                />
+              );
+            })}
+
           {linking && linkCursor && positions[linking.from] && (
             <path
               d={(() => {
@@ -1034,8 +1513,11 @@ function TreeEditorInner({
           const isSelected = selectedId === id;
           const isEditing = editingId === id;
           const showHandles =
-            !readOnly && (hoveredId === id || linking !== null);
+            !readOnly && !drag && (hoveredId === id || linking !== null);
           const hasChildren = node.children.length > 0;
+          // The dragged node paints over its ghost slot, so the capture by the
+          // automatic slot is signalled on the node itself.
+          const capturedByAuto = !!drag?.atAuto && drag.subtree.has(id);
           return (
             <NodePositioner
               key={id}
@@ -1050,7 +1532,14 @@ function TreeEditorInner({
                   width: NODE_W,
                   height: NODE_H,
                   background: nodeColor(node),
-                  outline: isSelected ? "2px solid #ffffff" : "none",
+                  outline: capturedByAuto
+                    ? `2px solid ${GUIDE_COLOR}`
+                    : isSelected
+                      ? "2px solid #ffffff"
+                      : "none",
+                  boxShadow: capturedByAuto
+                    ? "0 0 0 5px rgba(143,179,255,0.35), 0 2px 8px rgba(0,0,0,0.35)"
+                    : undefined,
                 }}
                 onPointerDown={(e) => onNodePointerDown(id, e)}
                 onDoubleClick={() => !readOnly && setEditingId(id)}
@@ -1079,6 +1568,32 @@ function TreeEditorInner({
                   <NodeText>{node.text || t("Untitled")}</NodeText>
                 )}
               </NodeBox>
+
+              {!readOnly && isPinned(node) && (
+                <PinBadge
+                  title={
+                    node.offset
+                      ? t(
+                          "Placed by hand. Click to return to the automatic position"
+                        )
+                      : t(
+                          "Children placed by hand. Click to return them to the automatic layout"
+                        )
+                  }
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseEnter={() =>
+                    !drag && setPreviewTree(autoPlacedTree(id))
+                  }
+                  onMouseLeave={() => setPreviewTree(null)}
+                  onClick={() => {
+                    const next = autoPlacedTree(id);
+                    setPreviewTree(null);
+                    if (next) {
+                      commit(next);
+                    }
+                  }}
+                />
+              )}
 
               {showHandles &&
                 (["top", "bottom", "left", "right"] as Side[]).map((side) => (
@@ -1132,6 +1647,25 @@ function TreeEditorInner({
                       {node.collapsed ? "▸" : "–"}
                     </Btn>
                   )}
+                  {hasChildren && (
+                    <Btn
+                      title={t("Tidy branch")}
+                      disabled={!tidiedBranchTree(id)}
+                      onMouseEnter={() =>
+                        !drag && setPreviewTree(tidiedBranchTree(id))
+                      }
+                      onMouseLeave={() => setPreviewTree(null)}
+                      onClick={() => {
+                        const next = tidiedBranchTree(id);
+                        setPreviewTree(null);
+                        if (next) {
+                          commit(next);
+                        }
+                      }}
+                    >
+                      ⟲
+                    </Btn>
+                  )}
                   <Btn
                     title={t("Delete")}
                     $danger
@@ -1178,6 +1712,31 @@ function TreeEditorInner({
           </Btn>
           <Btn title={t("Fit to view")} onClick={fitToView}>
             ⤢
+          </Btn>
+          <Divider />
+          <Btn
+            title={t("Tidy all")}
+            disabled={!tidiedAllTree}
+            onMouseEnter={() => !drag && setPreviewTree(tidiedAllTree)}
+            onMouseLeave={() => setPreviewTree(null)}
+            onClick={() => {
+              if (tidiedAllTree) {
+                setPreviewTree(null);
+                pendingFitRef.current = true;
+                commit(tidiedAllTree);
+              }
+            }}
+          >
+            ⊞
+          </Btn>
+          <Btn
+            title={t(
+              "Snap to guides (hold Alt or Ctrl while dragging to bypass; Esc cancels a drag)"
+            )}
+            $active={snapEnabled}
+            onClick={() => setSnapEnabled((v) => !v)}
+          >
+            ⌖
           </Btn>
           <Divider />
           <Btn
@@ -1400,14 +1959,18 @@ const ColorInput = styled.input`
   cursor: pointer;
 `;
 
-const Btn = styled.button<{ $danger?: boolean }>`
+const Btn = styled.button<{ $danger?: boolean; $active?: boolean }>`
   min-width: 24px;
   height: 24px;
   padding: 0 6px;
   border-radius: 4px;
   border: none;
   background: ${(p) =>
-    p.$danger ? "rgba(200,60,60,0.25)" : "rgba(255,255,255,0.1)"};
+    p.$danger
+      ? "rgba(200,60,60,0.25)"
+      : p.$active
+        ? "rgba(143,179,255,0.35)"
+        : "rgba(255,255,255,0.1)"};
   color: #fff;
   cursor: pointer;
   font-size: 14px;
@@ -1415,7 +1978,39 @@ const Btn = styled.button<{ $danger?: boolean }>`
 
   &:hover {
     background: ${(p) =>
-      p.$danger ? "rgba(200,60,60,0.5)" : "rgba(255,255,255,0.2)"};
+      p.$danger
+        ? "rgba(200,60,60,0.5)"
+        : p.$active
+          ? "rgba(143,179,255,0.5)"
+          : "rgba(255,255,255,0.2)"};
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  &:disabled:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+`;
+
+/* Deliberately unlike the round blue link handles: a small amber square. */
+const PinBadge = styled.div`
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  background: #f5b942;
+  border: 1px solid #1b211f;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  z-index: 2;
+
+  &:hover {
+    background: #ffffff;
   }
 `;
 
