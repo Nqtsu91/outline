@@ -1039,13 +1039,15 @@ function TreeEditorInner({
   // Frame the camera on the content once at open. This replaces the old layout
   // normalization: nodes keep their absolute positions, only the camera moves,
   // so existing trees are always discoverable wherever they were dragged.
+  // Framing waits for the measured height, otherwise it would be computed
+  // against the CSS fallback and could leave the lowest nodes cut off.
   const framedRef = React.useRef(false);
   React.useEffect(() => {
-    if (!framedRef.current) {
+    if (!framedRef.current && fillHeight !== undefined) {
       framedRef.current = true;
       fitToView();
     }
-  }, [fitToView]);
+  }, [fitToView, fillHeight]);
 
   // "Tidy all" is the one tidy action allowed to move the camera: it refits
   // once the new layout is known.

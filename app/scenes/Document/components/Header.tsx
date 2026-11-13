@@ -103,9 +103,16 @@ function DocumentHeader({
     });
   }, [onSave]);
 
+  // Canvas and tree pages have no headings and no table of contents.
+  const isBoard =
+    !isRevision && (document.type === "canvas" || document.type === "tree");
+
   const handleToggle = useCallback(() => {
+    if (isBoard) {
+      return;
+    }
     ui.set({ tocVisible: !ui.tocVisible });
-  }, [ui]);
+  }, [ui, isBoard]);
 
   const can = usePolicy(document);
   const { isDeleted } = document;
@@ -182,7 +189,8 @@ function DocumentHeader({
           <TableOfContentsMenu />
         ) : (
           <DocumentBreadcrumb document={document}>
-            {toc} <Star document={document} color={theme.textSecondary} />
+            {!isBoard && toc}{" "}
+            <Star document={document} color={theme.textSecondary} />
           </DocumentBreadcrumb>
         )
       }

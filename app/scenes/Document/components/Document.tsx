@@ -379,7 +379,9 @@ function DocumentScene({
                   />
                 ) : document.type === "canvas" ? (
                   <>
-                    <Notices document={document} readOnly={readOnly} />
+                    <BoardNotices>
+                      <Notices document={document} readOnly={readOnly} />
+                    </BoardNotices>
                     <CanvasEditor
                       document={document}
                       readOnly={readOnly || !abilities.update}
@@ -387,7 +389,9 @@ function DocumentScene({
                   </>
                 ) : document.type === "tree" ? (
                   <>
-                    <Notices document={document} readOnly={readOnly} />
+                    <BoardNotices>
+                      <Notices document={document} readOnly={readOnly} />
+                    </BoardNotices>
                     <TreeEditor
                       document={document}
                       readOnly={readOnly || !abilities.update}
@@ -443,7 +447,7 @@ function DocumentScene({
               )}
             </React.Suspense>
           </Main>
-          {children}
+          {!isBoard && children}
         </Container>
       </MeasuredContainer>
     </ErrorBoundary>
@@ -545,6 +549,11 @@ const EditorContainer = styled.div<EditorContainerProps>`
           : "1 / -1"
         : 2};
   `};
+`;
+
+// Boards have no side gutter; notices above them keep a small one.
+const BoardNotices = styled.div`
+  padding: 0 12px;
 `;
 
 const Background = styled(Container)`
