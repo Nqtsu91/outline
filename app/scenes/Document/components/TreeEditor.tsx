@@ -28,8 +28,10 @@ import useStores from "~/hooks/useStores";
  *    own automatic slot (guides are drawn); hold Alt or Ctrl to disable
  *    snapping, press Escape to cancel the drag;
  *  - right-drag (or left-drag on the background) pans the camera;
- *  - hovering a node shows four handles to draw manual links; multiple links
- *    may target the same node;
+ *  - hovering a node shows four handles to draw arrows. An arrow drawn onto
+ *    the root of another tree makes that tree a real child of the source
+ *    node; any other arrow (target already has a parent, or it would create
+ *    a loop) stays a free manual link;
  *  - clicking any arrow opens a small menu: a manual link can be deleted, a
  *    parent-to-child arrow can be detached (the child becomes its own tree);
  *  - the node toolbar moves a node one level up or down its hierarchy.
@@ -196,22 +198,22 @@ function normalize(data: unknown): TreeData | null {
   const links = dedupeLinks(Array.isArray(d.links) ? d.links : []);
   const nodes = migrateNodes(d.nodes);
   if (Array.isArray(d.rootIds) && d.rootIds.length) {
-    return {
+    return adoptLinks({
       rootIds: d.rootIds,
       nodes,
       links,
       bgColor: d.bgColor,
       arrowStyle: d.arrowStyle,
-    };
+    });
   }
   if (d.rootId && d.nodes[d.rootId]) {
-    return {
+    return adoptLinks({
       rootIds: [d.rootId],
       nodes,
       links,
       bgColor: d.bgColor,
       arrowStyle: d.arrowStyle,
-    };
+    });
   }
   return null;
 }
@@ -514,6 +516,94 @@ function demotedTree(tree: TreeData, id: string): TreeData | null {
     return { ...tree, nodes };
   }
   return { ...tree, rootIds: tree.rootIds.filter((r) => r !== id), nodes };
+}
+
+/** True when `id` is `ancestorId` itself or lies in its sub-tree. */
+function isInSubtree(tree: TreeData, ancestorId: string, id: string): boolean {
+  const seen = new Set<string>();
+  const stack = [ancestorId];
+  while (stack.length) {
+    const cur = stack.pop() as string;
+    if (cur === id) {
+      return true;
+    }
+    if (seen.has(cur) || !tree.nodes[cur]) {
+      continue;
+    }
+    seen.add(cur);
+    tree.nodes[cur].children.forEach((c) => stack.push(c));
+  }
+  return false;
+}
+
+/**
+ * Turns the arrow `from` -> `to` into a real parent/child relation when the
+ * hierarchy allows it: `to` must be the root of its own tree and must not
+ * contain `from` (no loop). The adopted node is pinned so that it keeps its
+ * position relative to its new parent; the whole tree can then be tidied
+ * like any other. A manual link between the two nodes is absorbed. Returns
+ * null when the arrow has to stay a manual link.
+ */
+function adoptedTree(
+  tree: TreeData,
+  from: string,
+  to: string
+): TreeData | null {
+  const parent = tree.nodes[from];
+  const child = tree.nodes[to];
+  if (
+    !parent ||
+    !child ||
+    from === to ||
+    !tree.rootIds.includes(to) ||
+    findParent(tree, to) ||
+    isInSubtree(tree, to, from)
+  ) {
+    return null;
+  }
+  const before = computeLayout(tree).positions;
+  const base = parent.children.length ? parent : unpinChildren(parent);
+  const next: TreeData = {
+    ...tree,
+    rootIds: tree.rootIds.filter((r) => r !== to),
+    links: (tree.links ?? []).filter(
+      (l) => !(l.from === from && l.to === to)
+    ),
+    nodes: {
+      ...tree.nodes,
+      [to]: unpinSelf(child),
+      [from]: {
+        ...base,
+        collapsed: false,
+        children: [...parent.children, to],
+      },
+    },
+  };
+  const after = computeLayout(next).positions;
+  const a = before[from];
+  const b = before[to];
+  const a2 = after[from];
+  const b2 = after[to];
+  if (a && b && a2 && b2) {
+    next.nodes[to] = shiftOffset(
+      next.nodes[to],
+      b.x - a.x - (b2.x - a2.x),
+      b.y - a.y - (b2.y - a2.y)
+    );
+  }
+  return next;
+}
+
+/**
+ * Upgrades links saved before arrows could create children: every link that
+ * can be a parent/child relation becomes one, in link order.
+ */
+function adoptLinks(tree: TreeData): TreeData {
+  let current = tree;
+  (tree.links ?? []).forEach((l) => {
+    current = adoptedTree(current, l.from, l.to) ?? current;
+  });
+  return current;
 }
 
 /**
@@ -1433,6 +1523,12 @@ function TreeEditorInner({
         setLinking(null);
         setLinkCursor(null);
         const current = treeRef.current;
+        // An arrow drawn onto the root of another tree makes it a real child.
+        const adopted = toId && toSide ? adoptedTree(current, id, toId) : null;
+        if (adopted) {
+          commit(adopted);
+          return;
+        }
         const existing = current.links ?? [];
         if (
           toId &&
@@ -1870,9 +1966,7 @@ function TreeEditorInner({
                           ? t(
                               "Tidy branch: no child of this node was placed by hand"
                             )
-                          : t(
-                              "Tidy branch: this node has no children (manual links are not children)"
-                            )
+                          : t("Tidy branch: this node has no children")
                     }
                     disabled={!tidiedBranchTree(id)}
                     onMouseEnter={() =>
