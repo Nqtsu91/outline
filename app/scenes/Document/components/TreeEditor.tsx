@@ -28,7 +28,10 @@ import useStores from "~/hooks/useStores";
  *    snapping, press Escape to cancel the drag;
  *  - right-drag (or left-drag on the background) pans the camera;
  *  - hovering a node shows four handles to draw manual links; multiple links
- *    may target the same node, and clicking a link opens a delete menu.
+ *    may target the same node;
+ *  - clicking any arrow opens a small menu: a manual link can be deleted, a
+ *    parent-to-child arrow can be detached (the child becomes its own tree);
+ *  - the node toolbar moves a node one level up or down its hierarchy.
  *
  * Supports pan/zoom, fit-to-view, undo/redo and autosave. Connections stretch
  * live while dragging.
@@ -189,7 +192,7 @@ function normalize(data: unknown): TreeData | null {
   if (!d || !d.nodes) {
     return null;
   }
-  const links = Array.isArray(d.links) ? d.links : [];
+  const links = dedupeLinks(Array.isArray(d.links) ? d.links : []);
   const nodes = migrateNodes(d.nodes);
   if (Array.isArray(d.rootIds) && d.rootIds.length) {
     return {
@@ -403,6 +406,145 @@ function routeEdge(
     mid = `L ${ea.x} ${eb.y}`;
   }
   return `M ${a.x} ${a.y} L ${ea.x} ${ea.y} ${mid} L ${eb.x} ${eb.y} L ${b.x} ${b.y}`;
+}
+
+/**
+ * Drops exact duplicates (same nodes and same sides). Identical links stack
+ * exactly on top of each other, so deleting one looked like the arrow could
+ * not be deleted. Links between the same nodes on different sides are
+ * distinct arrows and are kept.
+ */
+function dedupeLinks(links: TreeLink[]): TreeLink[] {
+  const seen = new Set<string>();
+  return links.filter((l) => {
+    const key = `${l.from}>${l.to}>${l.fromSide}>${l.toSide}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Tree-parent of `id` (children arrays only), or undefined for a root. */
+function findParent(tree: TreeData, id: string): string | undefined {
+  return Object.keys(tree.nodes).find((pid) =>
+    tree.nodes[pid].children.includes(id)
+  );
+}
+
+/** Copy of `node` without its own pin, keeping its children block as is. */
+function unpinSelf(node: TreeNode): TreeNode {
+  const { offset: _o, ...rest } = node;
+  return rest;
+}
+
+/** Copy of `parent` without child `id`; a now-empty block loses its pin. */
+function withoutChild(parent: TreeNode, id: string): TreeNode {
+  const children = parent.children.filter((c) => c !== id);
+  return { ...(children.length ? parent : unpinChildren(parent)), children };
+}
+
+/**
+ * Moves `id` (with its sub-tree) one level up: it becomes the next sibling of
+ * its former parent, or a tree of its own when that parent was a root. The
+ * node takes its new automatic slot. Returns null for a root.
+ */
+function promotedTree(tree: TreeData, id: string): TreeData | null {
+  const parentId = findParent(tree, id);
+  const node = tree.nodes[id];
+  if (!node || !parentId) {
+    return null;
+  }
+  const nodes = {
+    ...tree.nodes,
+    [id]: unpinSelf(node),
+    [parentId]: withoutChild(tree.nodes[parentId], id),
+  };
+  const grandId = findParent(tree, parentId);
+  if (grandId) {
+    const siblings = [...nodes[grandId].children];
+    siblings.splice(siblings.indexOf(parentId) + 1, 0, id);
+    nodes[grandId] = { ...nodes[grandId], children: siblings };
+    return { ...tree, nodes };
+  }
+  const rootIds = [...tree.rootIds];
+  const at = rootIds.indexOf(parentId);
+  rootIds.splice(at < 0 ? rootIds.length : at + 1, 0, id);
+  return { ...tree, rootIds, nodes };
+}
+
+/**
+ * Moves `id` (with its sub-tree) one level down: it becomes a child of the
+ * sibling just above it (appended last), or of the sibling just below when it
+ * is the first one (inserted first). Returns null when it has no sibling.
+ */
+function demotedTree(tree: TreeData, id: string): TreeData | null {
+  const node = tree.nodes[id];
+  if (!node) {
+    return null;
+  }
+  const parentId = findParent(tree, id);
+  const siblings = (
+    parentId ? tree.nodes[parentId].children : tree.rootIds
+  ).filter((s) => tree.nodes[s]);
+  const index = siblings.indexOf(id);
+  if (index < 0) {
+    return null;
+  }
+  const above = siblings[index - 1];
+  const targetId = above ?? siblings[index + 1];
+  if (!targetId) {
+    return null;
+  }
+  const target = tree.nodes[targetId];
+  const base = target.children.length ? target : unpinChildren(target);
+  const nodes = {
+    ...tree.nodes,
+    [id]: unpinSelf(node),
+    [targetId]: {
+      ...base,
+      collapsed: false,
+      children: above ? [...target.children, id] : [id, ...target.children],
+    },
+  };
+  if (parentId) {
+    nodes[parentId] = withoutChild(nodes[parentId], id);
+    return { ...tree, nodes };
+  }
+  return { ...tree, rootIds: tree.rootIds.filter((r) => r !== id), nodes };
+}
+
+/**
+ * Cuts the parent-to-child arrow above `id`: the node (with its sub-tree)
+ * becomes a tree of its own and is pinned where it currently sits, so
+ * removing the arrow does not move it. Returns null for a root.
+ */
+function detachedTree(tree: TreeData, id: string): TreeData | null {
+  const parentId = findParent(tree, id);
+  const node = tree.nodes[id];
+  if (!node || !parentId) {
+    return null;
+  }
+  const next: TreeData = {
+    ...tree,
+    rootIds: [...tree.rootIds, id],
+    nodes: {
+      ...tree.nodes,
+      [id]: unpinSelf(node),
+      [parentId]: withoutChild(tree.nodes[parentId], id),
+    },
+  };
+  const before = computeLayout(tree).positions[id];
+  const slot = computeLayout(next).positions[id];
+  if (before && slot) {
+    next.nodes[id] = shiftOffset(
+      next.nodes[id],
+      before.x - slot.x,
+      before.y - slot.y
+    );
+  }
+  return next;
 }
 
 type SnapCandidate = {
@@ -715,6 +857,19 @@ function TreeEditorInner({
     [tree, commit]
   );
 
+  /** Commits a hierarchy move and brings the moved node into view. */
+  const moveLevel = React.useCallback(
+    (next: TreeData | null, id: string) => {
+      if (!next) {
+        return;
+      }
+      revealRef.current = id;
+      setLinkMenu(null);
+      commit(next);
+    },
+    [commit]
+  );
+
   // ---- automatic layout: returning pinned nodes to their slots ------------
 
   /** Tree where `id` and its children block are laid out automatically. */
@@ -902,11 +1057,15 @@ function TreeEditorInner({
   // When a node enters edit mode (e.g. it was just created off-screen, like a
   // new tree stacked below the others), pan the camera just enough to reveal
   // it — the nodes themselves never move.
+  const revealRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (!editingId) {
+    // A node just moved in its hierarchy is revealed the same way.
+    const target = revealRef.current ?? editingId;
+    revealRef.current = null;
+    if (!target) {
       return;
     }
-    const p = positions[editingId];
+    const p = positions[target];
     const el = containerRef.current;
     if (!p || !el) {
       return;
@@ -1220,11 +1379,32 @@ function TreeEditorInner({
 
   // Small contextual menu opened by clicking an arrow, to delete it safely
   // instead of removing it on a bare click. Coordinates are viewport-relative.
+  // It targets either a manual link (deletable) or a parent-to-child arrow
+  // (detachable): both look the same on the canvas, so both must respond.
   const [linkMenu, setLinkMenu] = React.useState<{
-    linkId: string;
+    linkId?: string;
+    edge?: { from: string; to: string };
     x: number;
     y: number;
   } | null>(null);
+
+  const openArrowMenu = (
+    e: React.PointerEvent,
+    target: { linkId?: string; edge?: { from: string; to: string } }
+  ) => {
+    if (e.button !== 0) {
+      return;
+    }
+    e.stopPropagation();
+    const rect = containerRef.current?.getBoundingClientRect();
+    // Offset below the cursor so the menu doesn't sit right under the
+    // pointer, which invited accidental clicks.
+    setLinkMenu({
+      ...target,
+      x: e.clientX - (rect?.left ?? 0) - 20,
+      y: e.clientY - (rect?.top ?? 0) + 28,
+    });
+  };
 
   const startLink = React.useCallback(
     (id: string, side: Side, e: React.PointerEvent) => {
@@ -1248,11 +1428,24 @@ function TreeEditorInner({
         const toSide = target?.getAttribute("data-side") as Side | undefined;
         setLinking(null);
         setLinkCursor(null);
-        if (toId && toSide && toId !== id) {
+        const current = treeRef.current;
+        const existing = current.links ?? [];
+        if (
+          toId &&
+          toSide &&
+          toId !== id &&
+          !existing.some(
+            (l) =>
+              l.from === id &&
+              l.to === toId &&
+              l.fromSide === side &&
+              l.toSide === toSide
+          )
+        ) {
           commit({
-            ...tree,
+            ...current,
             links: [
-              ...(tree.links ?? []),
+              ...existing,
               { id: uid(), from: id, fromSide: side, to: toId, toSide },
             ],
           });
@@ -1261,7 +1454,7 @@ function TreeEditorInner({
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up);
     },
-    [toWorld, tree, commit]
+    [toWorld, commit]
   );
 
   // ---- keyboard: undo / redo ----------------------------------------------
@@ -1358,15 +1551,33 @@ function TreeEditorInner({
             const pa = posOf(from);
             const pb = posOf(to);
             const { aSide, bSide } = pickSides(pa, pb);
+            const d = routeEdge(pa, aSide, pb, bSide, arrowStyle);
+            const active =
+              linkMenu?.edge?.from === from && linkMenu?.edge?.to === to;
             return (
-              <path
-                key={`e-${from}-${to}`}
-                d={routeEdge(pa, aSide, pb, bSide, arrowStyle)}
-                fill="none"
-                stroke="rgba(255,255,255,0.35)"
-                strokeWidth={2}
-                markerEnd="url(#tree-arrow)"
-              />
+              <g key={`e-${from}-${to}`}>
+                <path
+                  d={d}
+                  fill="none"
+                  stroke={
+                    active ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.35)"
+                  }
+                  strokeWidth={2}
+                  markerEnd="url(#tree-arrow)"
+                />
+                {!readOnly && (
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={14}
+                    style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                    onPointerDown={(e) =>
+                      openArrowMenu(e, { edge: { from, to } })
+                    }
+                  />
+                )}
+              </g>
             );
           })}
 
@@ -1375,7 +1586,7 @@ function TreeEditorInner({
             const pb = posOf(l.to);
             const sides = effectiveSides(pa, l.fromSide, pb, l.toSide);
             const d = routeEdge(pa, sides.aSide, pb, sides.bSide, arrowStyle);
-            const active = linkMenu?.linkId === l.id;
+            const active = !!linkMenu && linkMenu.linkId === l.id;
             return (
               <g key={`l-${l.id}`}>
                 <path
@@ -1394,21 +1605,7 @@ function TreeEditorInner({
                     stroke="transparent"
                     strokeWidth={14}
                     style={{ pointerEvents: "stroke", cursor: "pointer" }}
-                    onPointerDown={(e) => {
-                      if (e.button !== 0) {
-                        return;
-                      }
-                      e.stopPropagation();
-                      const rect =
-                        containerRef.current?.getBoundingClientRect();
-                      // Offset below the cursor so the menu doesn't sit right
-                      // under the pointer, which invited accidental clicks.
-                      setLinkMenu({
-                        linkId: l.id,
-                        x: e.clientX - (rect?.left ?? 0) - 20,
-                        y: e.clientY - (rect?.top ?? 0) + 28,
-                      });
-                    }}
+                    onPointerDown={(e) => openArrowMenu(e, { linkId: l.id })}
                   />
                 )}
               </g>
@@ -1637,6 +1834,20 @@ function TreeEditorInner({
                   <Btn title={t("Add child")} onClick={() => addChild(id)}>
                     +
                   </Btn>
+                  <Btn
+                    title={t("Move up one level")}
+                    disabled={!promotedTree(tree, id)}
+                    onClick={() => moveLevel(promotedTree(tree, id), id)}
+                  >
+                    ←
+                  </Btn>
+                  <Btn
+                    title={t("Move down one level")}
+                    disabled={!demotedTree(tree, id)}
+                    onClick={() => moveLevel(demotedTree(tree, id), id)}
+                  >
+                    →
+                  </Btn>
                   {hasChildren && (
                     <Btn
                       title={node.collapsed ? t("Expand") : t("Collapse")}
@@ -1685,15 +1896,41 @@ function TreeEditorInner({
           style={{ left: linkMenu.x, top: linkMenu.y }}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <Btn
-            $danger
-            onClick={() => {
-              removeLink(linkMenu.linkId);
-              setLinkMenu(null);
-            }}
-          >
-            🗑 {t("Delete")}
-          </Btn>
+          {linkMenu.linkId ? (
+            <Btn
+              $danger
+              onClick={() => {
+                if (linkMenu.linkId) {
+                  removeLink(linkMenu.linkId);
+                }
+                setLinkMenu(null);
+              }}
+            >
+              🗑 {t("Delete")}
+            </Btn>
+          ) : (
+            <Btn
+              $danger
+              title={t(
+                "Cut this arrow: the node becomes a separate tree and stays where it is"
+              )}
+              onClick={() => {
+                // The hierarchy may have changed while the menu was open:
+                // only cut the arrow that was actually clicked.
+                const edge = linkMenu.edge;
+                const next =
+                  edge && findParent(tree, edge.to) === edge.from
+                    ? detachedTree(tree, edge.to)
+                    : null;
+                setLinkMenu(null);
+                if (next) {
+                  commit(next);
+                }
+              }}
+            >
+              ✂ {t("Detach")}
+            </Btn>
+          )}
           <Btn onClick={() => setLinkMenu(null)}>{t("Cancel")}</Btn>
         </LinkMenu>
       )}
