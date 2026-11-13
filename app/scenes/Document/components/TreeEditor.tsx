@@ -5,6 +5,7 @@ import styled from "styled-components";
 import type { JSONObject } from "@shared/types";
 import type Document from "~/models/Document";
 import { client } from "~/utils/ApiClient";
+import useFillViewportHeight from "~/hooks/useFillViewportHeight";
 import useStores from "~/hooks/useStores";
 
 /**
@@ -944,6 +945,7 @@ function TreeEditorInner({
   // ---- pan / zoom ----------------------------------------------------------
 
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const fillHeight = useFillViewportHeight(containerRef);
   const [view, setView] = React.useState({ x: 40, y: 40, scale: 1 });
   const viewRef = React.useRef(view);
   viewRef.current = view;
@@ -1520,7 +1522,7 @@ function TreeEditorInner({
     <Viewport
       ref={containerRef}
       tabIndex={0}
-      style={{ background: bg }}
+      style={{ background: bg, height: fillHeight }}
       onPointerDown={onBackgroundPointerDown}
       onContextMenu={(e) => e.preventDefault()}
       onWheel={onWheel}
@@ -1858,25 +1860,33 @@ function TreeEditorInner({
                       {node.collapsed ? "▸" : "–"}
                     </Btn>
                   )}
-                  {hasChildren && (
-                    <Btn
-                      title={t("Tidy branch")}
-                      disabled={!tidiedBranchTree(id)}
-                      onMouseEnter={() =>
-                        !drag && setPreviewTree(tidiedBranchTree(id))
+                  <Btn
+                    title={
+                      tidiedBranchTree(id)
+                        ? t("Tidy branch")
+                        : hasChildren
+                          ? t(
+                              "Tidy branch: no child of this node was placed by hand"
+                            )
+                          : t(
+                              "Tidy branch: this node has no children (manual links are not children)"
+                            )
+                    }
+                    disabled={!tidiedBranchTree(id)}
+                    onMouseEnter={() =>
+                      !drag && setPreviewTree(tidiedBranchTree(id))
+                    }
+                    onMouseLeave={() => setPreviewTree(null)}
+                    onClick={() => {
+                      const next = tidiedBranchTree(id);
+                      setPreviewTree(null);
+                      if (next) {
+                        commit(next);
                       }
-                      onMouseLeave={() => setPreviewTree(null)}
-                      onClick={() => {
-                        const next = tidiedBranchTree(id);
-                        setPreviewTree(null);
-                        if (next) {
-                          commit(next);
-                        }
-                      }}
-                    >
-                      ⟲
-                    </Btn>
-                  )}
+                    }}
+                  >
+                    ⟲
+                  </Btn>
                   <Btn
                     title={t("Delete")}
                     $danger
@@ -2064,8 +2074,8 @@ function TreeEditor({ document, readOnly }: Props) {
 const Viewport = styled.div`
   position: relative;
   width: 100%;
-  height: calc(100vh - 140px);
-  min-height: 480px;
+  height: calc(100vh - 68px);
+  min-height: 320px;
   overflow: hidden;
   outline: none;
   cursor: grab;

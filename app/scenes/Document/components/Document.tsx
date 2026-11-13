@@ -267,8 +267,15 @@ function DocumentScene({
     tocPosition ??
     ((team?.getPreference(TeamPreference.TocPosition) as TOCPosition) ||
       TOCPosition.Left);
+  // Canvas and tree pages are boards, not text: they take the whole page
+  // (no reading column, no gutter, no table of contents).
+  const isBoard =
+    !revision && (document.type === "canvas" || document.type === "tree");
+  const wide = document.fullWidth || isBoard;
   const showContents =
-    tocPos && (isShare ? ui.tocVisible !== false : ui.tocVisible === true);
+    !isBoard &&
+    tocPos &&
+    (isShare ? ui.tocVisible !== false : ui.tocVisible === true);
   const tocOffset =
     tocPos === TOCPosition.Left
       ? EditorStyleHelper.tocWidth / -2
@@ -339,16 +346,17 @@ function DocumentScene({
             />
           )}
           <Main
-            fullWidth={document.fullWidth}
+            fullWidth={wide}
             tocPosition={tocPos}
             style={fullWidthTransformOffsetStyle}
           >
             <React.Suspense
               fallback={
                 <EditorContainer
-                  docFullWidth={document.fullWidth}
+                  docFullWidth={wide}
                   showContents={showContents}
                   tocPosition={tocPos}
+                  $flush={isBoard}
                 >
                   <PlaceholderDocument />
                 </EditorContainer>
@@ -357,9 +365,10 @@ function DocumentScene({
               <MeasuredContainer
                 name="document"
                 as={EditorContainer}
-                docFullWidth={document.fullWidth}
+                docFullWidth={wide}
                 showContents={showContents}
                 tocPosition={tocPos}
+                $flush={isBoard}
               >
                 {revision ? (
                   <RevisionViewer
@@ -511,11 +520,13 @@ type EditorContainerProps = {
   docFullWidth: boolean;
   showContents: boolean;
   tocPosition: TOCPosition | false;
+  /** Removes the side gutter, for boards that span the whole page. */
+  $flush?: boolean;
 };
 
 const EditorContainer = styled.div<EditorContainerProps>`
   // Adds space to the gutter to make room for icon & heading annotations
-  padding: 0 44px;
+  padding: ${({ $flush }: EditorContainerProps) => ($flush ? "0" : "0 44px")};
 
   ${breakpoint("tablet")`
     grid-row: 1;

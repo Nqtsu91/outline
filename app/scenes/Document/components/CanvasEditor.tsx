@@ -9,6 +9,7 @@ import type { JSONObject } from "@shared/types";
 import type Document from "~/models/Document";
 import Logger from "~/utils/Logger";
 import { client } from "~/utils/ApiClient";
+import useFillViewportHeight from "~/hooks/useFillViewportHeight";
 import useStores from "~/hooks/useStores";
 
 type Props = {
@@ -47,6 +48,8 @@ function toInitialData(data: any): SceneData {
  */
 function CanvasEditor({ document, readOnly }: Props) {
   const { documents } = useStores();
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const fillHeight = useFillViewportHeight(containerRef);
 
   // Load the scene straight from the server rather than the store, which keeps
   // documents cached (so opening one skips the fetch) and can hand us a stale
@@ -126,11 +129,11 @@ function CanvasEditor({ document, readOnly }: Props) {
   React.useEffect(() => () => flush(), [flush]);
 
   if (initial === undefined) {
-    return <Container />;
+    return <Container ref={containerRef} style={{ height: fillHeight }} />;
   }
 
   return (
-    <Container>
+    <Container ref={containerRef} style={{ height: fillHeight }}>
       <Excalidraw
         initialData={
           initial ? { ...initial, scrollToContent: true } : undefined
@@ -147,8 +150,8 @@ function CanvasEditor({ document, readOnly }: Props) {
 const Container = styled.div`
   position: relative;
   width: 100%;
-  height: calc(100vh - 140px);
-  min-height: 480px;
+  height: calc(100vh - 68px);
+  min-height: 320px;
 `;
 
 export default observer(CanvasEditor);
